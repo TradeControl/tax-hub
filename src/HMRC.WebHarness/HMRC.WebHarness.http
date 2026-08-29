@@ -1,31 +1,5 @@
 @HMRC.WebHarness_HostAddress = http://localhost:5151
 
-POST {{HMRC.WebHarness_HostAddress}}/harness/itsa/qu
-Content-Type: application/json
-
-{
-  "connectionString": "Server=(localdb)\\MSSQLLocalDB;Database=TradeControl;Trusted_Connection=True;TrustServerCertificate=True",
-  "tenantId": "TENANT-001",
-  "subjectId": "SUB123",
-  "period": "2026-07-05",
-  "taxSourceCode": "UK-ITSA-SE-QU",
-  "environment": "sandbox"
-}
-
-###
-POST {{HMRC.WebHarness_HostAddress}}/harness/itsa/eops
-Content-Type: application/json
-
-{
-  "connectionString": "Server=(localdb)\\MSSQLLocalDB;Database=TradeControl;Trusted_Connection=True;TrustServerCertificate=True",
-  "tenantId": "TENANT-001",
-  "subjectId": "SUB123",
-  "period": "2027-04-05",
-  "taxSourceCode": "UK-ITSA-SE-EOPS",
-  "environment": "sandbox"
-}
-
-###
 POST {{HMRC.WebHarness_HostAddress}}/harness/mtd/micro
 Content-Type: application/json
 

@@ -8,45 +8,33 @@ namespace TradeControl.Tax.UK.Services.Runner;
 public sealed class HmrcSubmissionRunner
 {
     private readonly VatValidator _vatValidator;
-    private readonly QuValidator _quValidator;
-    private readonly EopsValidator _eopsValidator;
     private readonly MicroValidator _microValidator;
     private readonly ObligationValidator _obligationValidator;
     private readonly SubmissionHistoryValidator _submissionHistoryValidator;
     private readonly LiabilityValidator _liabilityValidator;
     private readonly PaymentValidator _paymentValidator;
     private readonly VatHarnessPayloadBuilder _vatPayloadBuilder;
-    private readonly QuHarnessPayloadBuilder _quPayloadBuilder;
-    private readonly EopsHarnessPayloadBuilder _eopsPayloadBuilder;
     private readonly MicroHarnessPayloadBuilder _microPayloadBuilder;
     private readonly SubmissionLogger _submissionLogger;
 
     public HmrcSubmissionRunner(
         VatValidator vatValidator,
-        QuValidator quValidator,
-        EopsValidator eopsValidator,
         MicroValidator microValidator,
         ObligationValidator obligationValidator,
         SubmissionHistoryValidator submissionHistoryValidator,
         LiabilityValidator liabilityValidator,
         PaymentValidator paymentValidator,
         VatHarnessPayloadBuilder vatPayloadBuilder,
-        QuHarnessPayloadBuilder quPayloadBuilder,
-        EopsHarnessPayloadBuilder eopsPayloadBuilder,
         MicroHarnessPayloadBuilder microPayloadBuilder,
         SubmissionLogger submissionLogger)
     {
         _vatValidator = vatValidator;
-        _quValidator = quValidator;
-        _eopsValidator = eopsValidator;
         _microValidator = microValidator;
         _obligationValidator = obligationValidator;
         _submissionHistoryValidator = submissionHistoryValidator;
         _liabilityValidator = liabilityValidator;
         _paymentValidator = paymentValidator;
         _vatPayloadBuilder = vatPayloadBuilder;
-        _quPayloadBuilder = quPayloadBuilder;
-        _eopsPayloadBuilder = eopsPayloadBuilder;
         _microPayloadBuilder = microPayloadBuilder;
         _submissionLogger = submissionLogger;
     }
@@ -80,8 +68,6 @@ public sealed class HmrcSubmissionRunner
             var result = operationType switch
             {
                 OperationType.SubmitVat => await ExecuteSubmitVatAsync(request.Parameters, cancellationToken),
-                OperationType.SubmitQu => await ExecuteSubmitQuAsync(request.Parameters, cancellationToken),
-                OperationType.SubmitEops => await ExecuteSubmitEopsAsync(request.Parameters, cancellationToken),
                 OperationType.SubmitMicro => await ExecuteSubmitMicroAsync(request.Parameters, cancellationToken),
                 OperationType.GetObligations => BuildNotImplementedEnquiryResult("GET_OBLIGATIONS"),
                 OperationType.GetSubmissions => BuildNotImplementedEnquiryResult("GET_SUBMISSIONS"),
@@ -118,8 +104,6 @@ public sealed class HmrcSubmissionRunner
         return operationType switch
         {
             OperationType.SubmitVat => _vatValidator.Validate(parameters),
-            OperationType.SubmitQu => _quValidator.Validate(parameters),
-            OperationType.SubmitEops => _eopsValidator.Validate(parameters),
             OperationType.SubmitMicro => _microValidator.Validate(parameters),
             OperationType.GetObligations => _obligationValidator.Validate(parameters),
             OperationType.GetSubmissions => _submissionHistoryValidator.Validate(parameters),
@@ -138,34 +122,6 @@ public sealed class HmrcSubmissionRunner
             parameters["taxSourceCode"]!.ToString()!,
             parameters["subjectId"]!.ToString()!,
             DateTime.Parse(parameters["periodEndOn"]!.ToString()!),
-            cancellationToken);
-
-        return BuildSubmissionSuccessResult(payload);
-    }
-
-    private async Task<HmrcSubmissionResult> ExecuteSubmitQuAsync(
-        Dictionary<string, object?> parameters,
-        CancellationToken cancellationToken)
-    {
-        var payload = await _quPayloadBuilder.BuildAsync(
-            parameters["connectionString"]!.ToString()!,
-            parameters["taxSourceCode"]!.ToString()!,
-            parameters["subjectId"]!.ToString()!,
-            DateTime.Parse(parameters["periodTo"]!.ToString()!),
-            cancellationToken);
-
-        return BuildSubmissionSuccessResult(payload);
-    }
-
-    private async Task<HmrcSubmissionResult> ExecuteSubmitEopsAsync(
-        Dictionary<string, object?> parameters,
-        CancellationToken cancellationToken)
-    {
-        var payload = await _eopsPayloadBuilder.BuildAsync(
-            parameters["connectionString"]!.ToString()!,
-            parameters["taxSourceCode"]!.ToString()!,
-            parameters["subjectId"]!.ToString()!,
-            DateTime.Parse(parameters["periodTo"]!.ToString()!),
             cancellationToken);
 
         return BuildSubmissionSuccessResult(payload);

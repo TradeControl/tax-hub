@@ -7,8 +7,6 @@ lockdown‑era prototype and is now aligned with the 2026 specification suite.
 The module provides:
 
 - VAT submissions (MTD VAT)
-- Quarterly Update submissions (QU)
-- End‑of‑Period Statement submissions (EOPS)
 - Micro‑entity submissions
 - HMRC enquiry surfaces:
   - obligations
