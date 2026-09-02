@@ -1,0 +1,21 @@
+{
+  "balanceDetails": {
+    "payableAmount": 125.50,
+    "pendingChargeDueAmount": 25.00,
+    "overdueAmount": 0,
+    "bcdBalancePerYear": [{ "taxYear": "2025-26", "bcdAmount": 10.00 }],
+    "totalBalance": 150.50,
+    "availableCredit": 5.00
+  },
+  "codingDetails": [{ "returnTaxYear": "2025-26", "totalLiabilityAmount": 150.50 }],
+  "documentDetails": [{
+    "taxYear": "2025-26", "documentId": "doc1", "documentDate": "2026-04-05",
+    "originalAmount": 100.00, "outstandingAmount": 25.00,
+    "isChargeEstimate": false, "isCodedOut": false
+  }],
+  "financialDetails": [{
+    "taxYear": "2025-26",
+    "chargeDetail": { "documentId": "doc1", "chargeType": "1005" },
+    "items": [{ "itemId": "001", "amount": 100.00, "isReturn": true }]
+  }]
+}

@@ -1,0 +1,8 @@
+{
+  "businessId": "XAIS12345678901",
+  "typeOfBusiness": "self-employment",
+  "totalIncome": 2500.00,
+  "totalExpenses": 400.00,
+  "netProfit": 2100.00,
+  "taxableProfit": 2050.00
+}

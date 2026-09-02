@@ -1,0 +1,10 @@
+{
+  "metadata": { "calculationId": "calc-1", "taxYear": "2025-26", "calculationType": "intent-to-finalise" },
+  "calculation": {
+    "businessProfitAndLoss": [ { "businessId": "XAIS12345678901", "netProfit": 2100.00 } ],
+    "taxDeductedAtSource": { "taxTakenOffTradingIncome": 25.00 },
+    "taxCalculation": { "totalIncomeTaxAndNicsAndCgt": 900.00, "totalIncomeTaxAndNicsDue": 850.00 }
+  },
+  "messages": { "warnings": [ { "id": "WARN", "text": "Representative warning" } ] },
+  "futureCalculationField": { "retained": true }
+}

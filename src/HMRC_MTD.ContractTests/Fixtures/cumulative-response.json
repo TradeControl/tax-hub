@@ -1,0 +1,5 @@
+{
+  "periodDates": { "periodStartDate": "2025-04-06", "periodEndDate": "2025-10-05" },
+  "periodIncome": { "turnover": 2500.00, "other": 15.00 },
+  "periodExpenses": { "consolidatedExpenses": 400.00 }
+}

@@ -1,0 +1,10 @@
+{
+  "adjustments": { "basisAdjustment": -50.00, "goodsAndServicesOwnUse": 100.00 },
+  "allowances": {
+    "annualInvestmentAllowance": 500.00,
+    "structuredBuildingAllowance": [
+      { "amount": 10.00, "building": { "name": "Workshop", "postcode": "AA1 1AA" } }
+    ]
+  },
+  "nonFinancials": { "class4NicsExemptionReason": "non-resident" }
+}

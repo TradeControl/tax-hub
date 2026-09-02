@@ -1,0 +1,11 @@
+{
+  "periodDates": { "periodStartDate": "2025-04-06", "periodEndDate": "2025-07-05" },
+  "periodIncome": { "turnover": 1000.00, "other": 0, "taxTakenOffTradingIncome": 25.00 },
+  "periodExpenses": {
+    "costOfGoods": 100, "paymentsToSubcontractors": 0, "wagesAndStaffCosts": 0,
+    "carVanTravelExpenses": 20, "premisesRunningCosts": 30, "maintenanceCosts": 0,
+    "adminCosts": 10, "businessEntertainmentCosts": 0, "advertisingCosts": 0,
+    "interestOnBankOtherLoans": 0, "financeCharges": 5, "irrecoverableDebts": 0,
+    "professionalFees": 0, "depreciation": 0, "otherExpenses": -2
+  }
+}

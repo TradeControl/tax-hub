@@ -1,0 +1,8 @@
+{
+  "claims": {
+    "carryBack": { "previousYearGeneralIncome": 100.00 },
+    "preferenceOrder": { "applyFirst": "carry-back" },
+    "carryForward": { "currentYearLosses": 200.00 }
+  },
+  "losses": { "broughtForwardLosses": 50.00 }
+}

@@ -1,0 +1,7 @@
+{
+  "businessId": "XAIS12345678901",
+  "accountingPeriod": { "startDate": "2025-04-06", "endDate": "2026-04-05" },
+  "totalIncome": 2500.00,
+  "totalExpenses": 400.00,
+  "netProfit": 2100.00
+}

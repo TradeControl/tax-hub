@@ -1,0 +1,19 @@
+{
+  "total": {
+    "income": 100.35,
+    "expenses": 50.01,
+    "additions": 575.71,
+    "deductions": 60.01,
+    "accountingAdjustments": -30.01
+  },
+  "profit": {
+    "net": 20.20,
+    "taxable": 35.55,
+    "adjusted": 30.01
+  },
+  "loss": {
+    "net": 0.01,
+    "taxable": 35.10
+  },
+  "outstandingBusinessIncome": 35.01
+}

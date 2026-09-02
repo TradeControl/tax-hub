@@ -1,0 +1,11 @@
+{
+  "obligations": [
+    {
+      "typeOfBusiness": "self-employment",
+      "businessId": "XAIS12345678901",
+      "obligationDetails": [
+        { "periodStartDate": "2025-04-06", "periodEndDate": "2025-07-05", "dueDate": "2025-08-07", "status": "O" }
+      ]
+    }
+  ]
+}
