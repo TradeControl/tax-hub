@@ -66,7 +66,7 @@ ORDER BY TagCode;
     {
         const string sql = """
 SELECT TaxSourceCode, PeriodStart, PeriodEnd, ValidationStatus, TagCode,
-       StatutoryPolarityCode, SupportStatus, StatutoryAmount
+       CashPolarityCode, SupportStatus, StatutoryAmount
 FROM Cash.fnTaxBizCumulative(@TaxSourceCode, @PeriodStart, @PeriodEnd)
 ORDER BY TagCode;
 """;
@@ -99,7 +99,7 @@ ORDER BY TagCode;
             values.Add(new TcCumulativeProjectionValue
             {
                 TagCode = SqlHelpers.GetString(reader, "TagCode"),
-                Orientation = reader.GetInt16(reader.GetOrdinal("StatutoryPolarityCode")) == 1
+                Orientation = reader.GetInt16(reader.GetOrdinal("CashPolarityCode")) == 1
                     ? TcTaxOrientation.Income
                     : TcTaxOrientation.Expense,
                 SupportStatus = supportStatus,
