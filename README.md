@@ -1,51 +1,47 @@
-# HMRC_MTD Module (Trade Control)
+# Tax Hub (Trade Control)
 
-This repository contains the implementation of the HMRC Making Tax Digital (MTD)
-submission and enquiry module for Trade Control. It replaces the legacy
-lockdown‑era prototype and is now aligned with the 2026 specification suite.
+This repository contains the technical implementation of the UK Tax Hub for
+Trade Control. It provides isolated statutory contracts, application workflows,
+Trade Control adapters and authority-submission adapters.
 
 The module provides:
 
-- VAT submissions (MTD VAT)
-- Micro‑entity submissions
-- HMRC enquiry surfaces:
-  - obligations
-  - submissions
-  - liabilities
-  - payments
+- HMRC MTD Income Tax contracts and enquiries
+- HMRC MTD VAT contracts and submissions
+- Limited Company statutory accounts contracts
+- Companies House accounts filing contracts
+- HMRC Corporation Tax contracts
+- offline contract validation and diagnostic tooling
 
-All behaviour, payload structures, validators, and execution rules are defined
-in the specification documents located in the `/docs`.
+Product specifications and implementation designs are maintained in the parent
+[`tradecontrol.web`](https://github.com/TradeControl/tradecontrol.web) repository
+under `docs/projects/Tax Hub`. This repository contains only technical material
+owned by the Tax Hub implementation.
 
-The HMRC_MTD repo is a sub-module of [treadecontrol.web](https://github.com/TradeControl/tradecontrol.web)
+Tax Hub is included in `tradecontrol.web` as the `src/tax-hub` Git submodule.
 
 ## Repository Status
 
-The master branch has been reset for the 2026 implementation.  
-
-This branch is now ready for the coding model to generate the new module
-according to the published specifications.
+The repository is being organised around explicit contract, application and
+adapter boundaries before Limited Company contract implementation begins.
 
 ## Target Framework
 
-The HMRC_MTD module is implemented as a .NET class library targeting:
+Contract, application and adapter libraries currently target `net8.0`. The
+diagnostic ASP.NET Core WebHarness currently targets `net9.0`.
 
-**`net8.0` (Long-Term Support)**
+## Solution
 
-This ensures compatibility with the modern ASP.NET Core ecosystem and aligns
-with the Trade Control platform’s forward development path.
-
-## Specification Documents
-
-The following document governs the implementation:
-
-- **tax-hub-spec-programme.md**  
-  High‑level specification and delivery plan, located in [treadecontrol.web](https://github.com/TradeControl/tradecontrol.web/blob/HEAD/docs/specs/tax-hub-spec-programme.md).
+Open `src/TaxHub.slnx` to build the standalone Tax Hub solution. The parent
+`tradecontrol.web` solution loads the WebHarness as the diagnostic composition
+root while retaining access to the other Trade Control repositories and product
+documentation.
 
 ## Build & Runtime
 
-The module is a standard .NET 8 class library and integrates with Trade Control
-through the submission runner and WebHarness API defined in the specification.
+The WebHarness is diagnostic only. Production integration with Trade Control
+will use the application and adapter boundaries defined by the parent
+repository's approved Tax Hub architecture.
 
 ## Licence
 

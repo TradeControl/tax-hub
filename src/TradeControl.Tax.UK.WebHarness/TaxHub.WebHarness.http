@@ -1,0 +1,26 @@
+@TaxHub.WebHarness_HostAddress = http://localhost:5151
+
+POST {{TaxHub.WebHarness_HostAddress}}/harness/mtd/micro
+Content-Type: application/json
+
+{
+  "connectionString": "Server=(localdb)\\MSSQLLocalDB;Database=TradeControl;Trusted_Connection=True;TrustServerCertificate=True",
+  "tenantId": "TENANT-001",
+  "subjectId": "SUB123",
+  "period": "2027-03-31",
+  "taxSourceCode": "UK-MTD",
+  "environment": "sandbox"
+}
+
+###
+POST {{TaxHub.WebHarness_HostAddress}}/harness/vat
+Content-Type: application/json
+
+{
+  "connectionString": "Server=(localdb)\\MSSQLLocalDB;Database=TradeControl;Trusted_Connection=True;TrustServerCertificate=True",
+  "tenantId": "TENANT-001",
+  "subjectId": "SUB123",
+  "period": "2026-06-30",
+  "taxSourceCode": "VAT",
+  "environment": "sandbox"
+}

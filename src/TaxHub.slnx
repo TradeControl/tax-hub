@@ -1,0 +1,22 @@
+<Solution>
+  <Folder Name="/Contracts/">
+    <Project Path="TradeControl.Tax.UK.Hmrc.MtdIncomeTax.Contracts/TradeControl.Tax.UK.Hmrc.MtdIncomeTax.Contracts.csproj" />
+    <Project Path="TradeControl.Tax.UK.Hmrc.Vat.Contracts/TradeControl.Tax.UK.Hmrc.Vat.Contracts.csproj" />
+    <Project Path="TradeControl.Tax.UK.Company.Contracts/TradeControl.Tax.UK.Company.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/Application/">
+    <Project Path="TradeControl.Tax.UK.Application/TradeControl.Tax.UK.Application.csproj" />
+  </Folder>
+  <Folder Name="/Adapters/">
+    <Project Path="TradeControl.Tax.UK.Adapters.TradeControl/TradeControl.Tax.UK.Adapters.TradeControl.csproj" />
+    <Project Path="TradeControl.Tax.UK.Adapters.Submission/TradeControl.Tax.UK.Adapters.Submission.csproj" />
+  </Folder>
+  <Folder Name="/Hosts/">
+    <Project Path="TradeControl.Tax.UK.WebHarness/TradeControl.Tax.UK.WebHarness.csproj" />
+  </Folder>
+  <Folder Name="/Tests/">
+    <Project Path="../tests/TradeControl.Tax.UK.Hmrc.MtdIncomeTax.ContractTests/TradeControl.Tax.UK.Hmrc.MtdIncomeTax.ContractTests.csproj" />
+    <Project Path="../tests/TradeControl.Tax.UK.Hmrc.Vat.ContractTests/TradeControl.Tax.UK.Hmrc.Vat.ContractTests.csproj" />
+    <Project Path="../tests/TradeControl.Tax.UK.Company.ContractTests/TradeControl.Tax.UK.Company.ContractTests.csproj" />
+  </Folder>
+</Solution>

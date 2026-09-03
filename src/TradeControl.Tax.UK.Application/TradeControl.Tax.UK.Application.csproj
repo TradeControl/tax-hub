@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>TradeControl.Tax.UK.Application</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TradeControl.Tax.UK.Hmrc.MtdIncomeTax.Contracts\TradeControl.Tax.UK.Hmrc.MtdIncomeTax.Contracts.csproj" />
+    <ProjectReference Include="..\TradeControl.Tax.UK.Hmrc.Vat.Contracts\TradeControl.Tax.UK.Hmrc.Vat.Contracts.csproj" />
+    <ProjectReference Include="..\TradeControl.Tax.UK.Company.Contracts\TradeControl.Tax.UK.Company.Contracts.csproj" />
+  </ItemGroup>
+</Project>
