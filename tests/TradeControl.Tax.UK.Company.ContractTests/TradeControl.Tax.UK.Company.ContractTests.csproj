@@ -8,4 +8,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\TradeControl.Tax.UK.Company.Contracts\TradeControl.Tax.UK.Company.Contracts.csproj" />
   </ItemGroup>
+
+  <ItemGroup>
+    <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

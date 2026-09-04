@@ -1,0 +1,2 @@
+<?xml version="1.0" encoding="utf-8"?>
+<GovTalkErrors xmlns="http://www.govtalk.gov.uk/CM/envelope"><Error><RaisedBy>offline-fixture</RaisedBy><Number>3001</Number><Type>fatal</Type><Text>Representative schema error</Text><Location>/IRenvelope</Location></Error></GovTalkErrors>
