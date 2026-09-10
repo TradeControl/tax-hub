@@ -15,6 +15,7 @@
     <Project Path="TradeControl.Tax.UK.WebHarness/TradeControl.Tax.UK.WebHarness.csproj" />
   </Folder>
   <Folder Name="/Tests/">
+    <Project Path="../tests/TradeControl.Tax.UK.DataProvision.Tests/TradeControl.Tax.UK.DataProvision.Tests.csproj" />
     <Project Path="../tests/TradeControl.Tax.UK.Hmrc.MtdIncomeTax.ContractTests/TradeControl.Tax.UK.Hmrc.MtdIncomeTax.ContractTests.csproj" />
     <Project Path="../tests/TradeControl.Tax.UK.Hmrc.Vat.ContractTests/TradeControl.Tax.UK.Hmrc.Vat.ContractTests.csproj" />
     <Project Path="../tests/TradeControl.Tax.UK.Company.ContractTests/TradeControl.Tax.UK.Company.ContractTests.csproj" />
