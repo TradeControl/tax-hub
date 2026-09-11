@@ -28,6 +28,7 @@ public sealed record StatutoryIdentityEvidence(
     int NumberOfEmployees,
     string? TradingAddress,
     string? RegisteredAddress,
+    string? StatutoryAddress,
     IReadOnlyList<SourceVersion> Versions);
 
 public sealed record RegistrationEvidence(
@@ -172,10 +173,7 @@ public static class StatutoryContextVerifier
         Required(identity.SubjectName, "LEGAL-NAME-MISSING", "The reporting name is missing.");
         Required(identity.RegistryJurisdictionCode, "REGISTRY-JURISDICTION-MISSING", "The registry jurisdiction is missing.");
         Required(identity.CurrencyCode, "CURRENCY-MISSING", "The reporting currency is missing.");
-        if (identity.BusinessTaxTypeCode == 0)
-            Required(identity.RegisteredAddress, "REGISTERED-ADDRESS-MISSING", "The registered address is missing.");
-        else if (identity.BusinessTaxTypeCode == 4)
-            Required(identity.TradingAddress, "TRADING-ADDRESS-MISSING", "The trading address is missing.");
+        Required(identity.StatutoryAddress, "STATUTORY-ADDRESS-MISSING", "The statutory address is missing.");
 
         if (identity.Versions.Count == 0 || identity.Versions.Any(version => string.IsNullOrWhiteSpace(version.RowVersion)))
             findings.Add(new("IDENTITY-PROVENANCE-MISSING", "Identity source provenance is incomplete."));

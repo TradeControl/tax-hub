@@ -44,7 +44,7 @@ public sealed class TcStatutoryContextReader : IStatutoryContextSource
             GetRequired("JurisdictionCode"), GetRequired("EffectiveRegistryJurisdictionCode"), GetRequired("UnitOfCharge"),
             GetNullable("CompanyNumber"), GetNullable("VatNumber"), GetNullable("BusinessDescription"),
             reader.GetInt32(reader.GetOrdinal("NumberOfEmployees")), GetNullable("TradingAddress"),
-            GetNullable("RegisteredAddress"), versions);
+            GetNullable("RegisteredAddress"), GetNullable("StatutoryAddress"), versions);
 
         var registrations = new List<RegistrationEvidence>();
         await reader.NextResultAsync(cancellationToken);
@@ -74,7 +74,7 @@ public sealed class TcStatutoryContextReader : IStatutoryContextSource
             throw new InvalidOperationException("The effective business-tax reporting window could not be resolved.");
         var window = new ReportingWindow(
             DateOnly.FromDateTime(reader.GetDateTime(reader.GetOrdinal("PayFrom"))),
-            DateOnly.FromDateTime(reader.GetDateTime(reader.GetOrdinal("PayTo"))));
+            DateOnly.FromDateTime(reader.GetDateTime(reader.GetOrdinal("PayTo"))).AddDays(-1));
 
         return new(identity, registrations, profiles, settings, window);
 

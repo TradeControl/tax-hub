@@ -5,6 +5,7 @@ using TradeControl.Tax.UK.Adapters.TradeControl.Data;
 using TradeControl.Tax.UK.Adapters.Submission.Audit;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Mapping;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Payloads;
+using TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Runner;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Validation;
 
@@ -32,6 +33,7 @@ builder.Services.AddSingleton<SubmissionHistoryValidator>();
 builder.Services.AddSingleton<LiabilityValidator>();
 builder.Services.AddSingleton<PaymentValidator>();
 builder.Services.AddSingleton<HmrcSubmissionRunner>();
+builder.Services.AddSingleton<CompanyAccountsPreviewService>();
 
 var app = builder.Build();
 

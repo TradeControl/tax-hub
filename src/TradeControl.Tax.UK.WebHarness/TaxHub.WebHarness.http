@@ -1,5 +1,22 @@
 @TaxHub.WebHarness_HostAddress = http://localhost:5151
 
+GET {{TaxHub.WebHarness_HostAddress}}/harness/company/accounts/min-full
+Accept: application/json
+
+###
+GET {{TaxHub.WebHarness_HostAddress}}/harness/company/accounts/min-full/raw
+Accept: application/xhtml+xml
+
+###
+GET {{TaxHub.WebHarness_HostAddress}}/harness/company/accounts/std-filleted
+Accept: application/json
+
+###
+GET {{TaxHub.WebHarness_HostAddress}}/harness/company/accounts/std-filleted/raw
+Accept: application/xhtml+xml
+
+###
+
 POST {{TaxHub.WebHarness_HostAddress}}/harness/mtd/micro
 Content-Type: application/json
 

@@ -3,6 +3,16 @@ using TradeControl.Tax.UK.Adapters.TradeControl.Data;
 using TradeControl.Tax.UK.Adapters.TradeControl.Readers;
 using TradeControl.Tax.UK.Application.DataProvision;
 
+CompanySourceBoundaryTests.Run();
+CompanyAccountsPopulationTests.Run();
+PreparedArtifactTests.Run();
+
+if (args.Contains("--offline", StringComparer.OrdinalIgnoreCase))
+{
+    Console.WriteLine("CO1 source-boundary and CO2 prepared-artifact verification passed (offline).");
+    return;
+}
+
 var connectionString = Environment.GetEnvironmentVariable("TC_NODE_CONTEXT");
 if (string.IsNullOrWhiteSpace(connectionString))
     throw new InvalidOperationException("TC_NODE_CONTEXT must be supplied by the local secret-backed test runner.");
@@ -33,6 +43,8 @@ Assert(findings.Count == 0,
 
 Assert(snapshot.BusinessTaxWindow.Start < snapshot.BusinessTaxWindow.End,
     "The business-tax reporting window is invalid.");
+Assert(snapshot.BusinessTaxWindow.End == snapshot.BusinessTaxWindow.Start.AddYears(1).AddDays(-1),
+    "The exclusive SQL PayTo boundary was not converted to an inclusive statutory period end.");
 Assert(snapshot.Registrations.Any(item => item.SchemeCode == "GB-UTR" && item.DisplayValue.Contains('*')),
     "A masked UTR was not returned.");
 Assert(snapshot.Profiles.All(item => string.IsNullOrEmpty(item.AuthorityReferenceDisplay)
@@ -102,9 +114,7 @@ else
     throw new InvalidOperationException("The sandbox has an unsupported business-tax type.");
 }
 
-CompanySourceBoundaryTests.Run();
-
-Console.WriteLine("DP5 context and CO1 company source-boundary verification passed.");
+Console.WriteLine("DP5 context, CO1 source boundary and CO2 prepared-artifact verification passed.");
 
 static void Assert(bool condition, string message)
 {
