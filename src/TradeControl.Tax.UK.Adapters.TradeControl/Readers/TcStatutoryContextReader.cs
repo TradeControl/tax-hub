@@ -35,17 +35,16 @@ public sealed class TcStatutoryContextReader : IStatutoryContextSource
         var versions = new List<SourceVersion>();
         AddVersion("App.tbOptions", "OptionsRowVer", null);
         AddVersion("Subject.tbSubject", "SubjectRowVer", "SubjectUpdatedOn");
-        AddVersion("Subject.tbAddress", "AddressRowVer", "AddressUpdatedOn");
-        AddVersion("Subject.tbAddressDetail", "AddressDetailRowVer", "AddressDetailUpdatedOn");
+        AddVersion("Subject.tbAddress:Trading", "TradingAddressRowVer", "TradingAddressUpdatedOn");
+        AddVersion("Subject.tbAddress:Registered", "RegisteredAddressRowVer", "RegisteredAddressUpdatedOn");
         AddVersion("Subject.tbVirtual", "VirtualRowVer", null);
 
         var identity = new StatutoryIdentityEvidence(
             GetRequired("SubjectCode"), GetRequired("SubjectName"), Convert.ToInt16(reader["BusinessTaxTypeCode"]),
             GetRequired("JurisdictionCode"), GetRequired("EffectiveRegistryJurisdictionCode"), GetRequired("UnitOfCharge"),
             GetNullable("CompanyNumber"), GetNullable("VatNumber"), GetNullable("BusinessDescription"),
-            reader.GetInt32(reader.GetOrdinal("NumberOfEmployees")), GetNullable("AddressLine1"), GetNullable("AddressLine2"),
-            GetNullable("AddressLine3"), GetNullable("Locality"), GetNullable("Region"), GetNullable("PostalCode"),
-            GetNullable("AddressJurisdictionCode"), GetBoolean("IsAddressReviewed"), versions);
+            reader.GetInt32(reader.GetOrdinal("NumberOfEmployees")), GetNullable("TradingAddress"),
+            GetNullable("RegisteredAddress"), versions);
 
         var registrations = new List<RegistrationEvidence>();
         await reader.NextResultAsync(cancellationToken);

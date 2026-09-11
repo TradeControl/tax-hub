@@ -26,14 +26,8 @@ public sealed record StatutoryIdentityEvidence(
     string? VatNumber,
     string? BusinessDescription,
     int NumberOfEmployees,
-    string? AddressLine1,
-    string? AddressLine2,
-    string? AddressLine3,
-    string? Locality,
-    string? Region,
-    string? PostalCode,
-    string? AddressJurisdictionCode,
-    bool IsAddressReviewed,
+    string? TradingAddress,
+    string? RegisteredAddress,
     IReadOnlyList<SourceVersion> Versions);
 
 public sealed record RegistrationEvidence(
@@ -178,12 +172,10 @@ public static class StatutoryContextVerifier
         Required(identity.SubjectName, "LEGAL-NAME-MISSING", "The reporting name is missing.");
         Required(identity.RegistryJurisdictionCode, "REGISTRY-JURISDICTION-MISSING", "The registry jurisdiction is missing.");
         Required(identity.CurrencyCode, "CURRENCY-MISSING", "The reporting currency is missing.");
-        Required(identity.AddressLine1, "ADDRESS-LINE-MISSING", "The structured address is missing.");
-        Required(identity.Locality, "ADDRESS-LOCALITY-MISSING", "The address locality is missing.");
-        Required(identity.PostalCode, "POSTAL-CODE-MISSING", "The postal code is missing.");
-
-        if (!identity.IsAddressReviewed)
-            findings.Add(new("ADDRESS-UNREVIEWED", "The structured address has not been reviewed."));
+        if (identity.BusinessTaxTypeCode == 0)
+            Required(identity.RegisteredAddress, "REGISTERED-ADDRESS-MISSING", "The registered address is missing.");
+        else if (identity.BusinessTaxTypeCode == 4)
+            Required(identity.TradingAddress, "TRADING-ADDRESS-MISSING", "The trading address is missing.");
 
         if (identity.Versions.Count == 0 || identity.Versions.Any(version => string.IsNullOrWhiteSpace(version.RowVersion)))
             findings.Add(new("IDENTITY-PROVENANCE-MISSING", "Identity source provenance is incomplete."));

@@ -102,7 +102,9 @@ else
     throw new InvalidOperationException("The sandbox has an unsupported business-tax type.");
 }
 
-Console.WriteLine("DP5 Application and Trade Control adapter verification passed.");
+CompanySourceBoundaryTests.Run();
+
+Console.WriteLine("DP5 context and CO1 company source-boundary verification passed.");
 
 static void Assert(bool condition, string message)
 {
