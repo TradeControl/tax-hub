@@ -1,19 +1,32 @@
 @TaxHub.WebHarness_HostAddress = http://localhost:5151
 
-GET {{TaxHub.WebHarness_HostAddress}}/harness/company/accounts/min-full
-Accept: application/json
-
-###
-GET {{TaxHub.WebHarness_HostAddress}}/harness/company/accounts/min-full/raw
+POST {{TaxHub.WebHarness_HostAddress}}/api/company/accounts
+Content-Type: application/json
 Accept: application/xhtml+xml
 
-###
-GET {{TaxHub.WebHarness_HostAddress}}/harness/company/accounts/std-filleted
-Accept: application/json
-
-###
-GET {{TaxHub.WebHarness_HostAddress}}/harness/company/accounts/std-filleted/raw
-Accept: application/xhtml+xml
+{
+  "sqlConnection": "Server=localhost;Database=TradeControl;Trusted_Connection=True;Encrypt=False",
+  "pilot": "company-accounts",
+  "profile": "full",
+  "asOfDate": "2026-09-12",
+  "isFirstAccountsPeriod": false,
+  "review": {
+    "companyNumber": "12345678",
+    "membersHaveNotRequiredAudit": true,
+    "directorsAcknowledgeResponsibilities": true,
+    "taxOnProfit": 0,
+    "comparativeTaxOnProfit": 0,
+    "prepaymentsAndAccruedIncome": 0,
+    "comparativePrepaymentsAndAccruedIncome": 0,
+    "provisions": 0,
+    "comparativeProvisions": 0,
+    "accrualsAndDeferredIncome": 0,
+    "comparativeAccrualsAndDeferredIncome": 0,
+    "approvedOn": "2027-04-30",
+    "signingDirectorCode": "DIRECTOR-1",
+    "signingDirectorName": "Synthetic Director"
+  }
+}
 
 ###
 

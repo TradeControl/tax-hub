@@ -1,3 +1,5 @@
+using TradeControl.Tax.UK.Application.DataProvision;
+
 namespace TradeControl.Tax.UK.Adapters.TradeControl.Data;
 
 public sealed class TcBusinessTaxView
@@ -39,6 +41,25 @@ public sealed class TcCumulativeProjection
     public DateTime PeriodEnd { get; init; }
     public TcTaxValidationStatus ValidationStatus { get; init; }
     public IReadOnlyList<TcCumulativeProjectionValue> Values { get; init; } = [];
+    public IReadOnlyList<SourceVersion> Versions { get; init; } = [];
+}
+
+public sealed class TcBalanceSheetProjection
+{
+    public string TaxSourceCode { get; init; } = string.Empty;
+    public DateTime AsOfDate { get; init; }
+    public DateTime? PeriodStart { get; init; }
+    public TcTaxValidationStatus ValidationStatus { get; init; }
+    public IReadOnlyList<TcBalanceSheetProjectionValue> Values { get; init; } = [];
+    public IReadOnlyList<SourceVersion> Versions { get; init; } = [];
+}
+
+public sealed class TcBalanceSheetProjectionValue
+{
+    public string TagCode { get; init; } = string.Empty;
+    public string ValueState { get; init; } = string.Empty;
+    public TcTaxSupportStatus SupportStatus { get; init; }
+    public decimal? StatutoryAmount { get; init; }
 }
 
 public sealed class TcCumulativeProjectionValue

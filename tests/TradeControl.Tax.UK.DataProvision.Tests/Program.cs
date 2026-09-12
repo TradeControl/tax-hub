@@ -91,6 +91,22 @@ if (snapshot.Identity.BusinessTaxTypeCode == 0)
         { Start = defaults.Period.Value.Start.AddDays(1) }).Origin == SuggestedValueOrigin.OperatorOverride,
         "A submission period override was not recorded as an operator value.");
 
+    var companySource = await new TcCompanyStatutorySourceReader(factory, connectionString).ReadAsync(
+        new(DateOnly.FromDateTime(DateTime.Today), null, null, false,
+            new("12345678", true, true, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m,
+                null, null, null, [], [], defaults.Period.Value.End.AddDays(30), "DIRECTOR-1", "Synthetic Director")));
+    var projectedIncome = await new TcBusinessTaxReader(factory).ReadCumulativeAsync(
+        connectionString, "UK-CO-ACCTS-2026",
+        companySource.Periods.Current.Start.ToDateTime(TimeOnly.MinValue),
+        companySource.Periods.Current.End.AddDays(1).ToDateTime(TimeOnly.MinValue));
+    decimal Projected(string tag) => projectedIncome.Values.Single(item =>
+        item.TagCode == tag && item.SupportStatus == TcTaxSupportStatus.Supported).StatutoryAmount!.Value;
+    Assert(companySource.IncomeStatement.Turnover.Current.Value == Projected("IncomeStatement.Turnover")
+        && companySource.IncomeStatement.OtherIncome.Current.Value == Projected("IncomeStatement.OtherIncome")
+        && companySource.IncomeStatement.CostOfSales.Current.Value == Projected("IncomeStatement.CostOfSales")
+        && companySource.IncomeStatement.AdministrativeExpenses.Current.Value == Projected("IncomeStatement.AdministrativeExpenses"),
+        "The company source did not preserve the SQL projection's exclusive PayTo boundary.");
+
     var taxDefaults = CorporationTaxDraftDefaults.Create(snapshot);
     Assert(taxDefaults.OtherAddBacks.Value.Count == 0
         && taxDefaults.Deductions.Value.Count == 0
@@ -114,7 +130,7 @@ else
     throw new InvalidOperationException("The sandbox has an unsupported business-tax type.");
 }
 
-Console.WriteLine("DP5 context, CO1 source boundary and CO2 prepared-artifact verification passed.");
+Console.WriteLine("DP5 context, CO1 source boundary, CO2 prepared-artifact and CO3 projection-boundary verification passed.");
 
 static void Assert(bool condition, string message)
 {

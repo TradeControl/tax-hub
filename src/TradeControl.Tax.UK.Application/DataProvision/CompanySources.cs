@@ -16,8 +16,32 @@ public sealed record StatutorySourceValue<T>(
     IReadOnlyList<SourceVersion> Versions);
 
 public sealed record CompanyProjectionRequest(
-    DateOnly AccountsPeriodEnd,
-    DateOnly AsOfDate);
+    DateOnly AsOfDate,
+    ReportingWindow? Period,
+    ReportingWindow? ComparativePeriod,
+    bool IsFirstAccountsPeriod,
+    CompanyAccountsReviewedInput ReviewedInput);
+
+public sealed record CompanyAccountsReviewedInput(
+    string? CompanyNumber,
+    bool MembersHaveNotRequiredAudit,
+    bool DirectorsAcknowledgeResponsibilities,
+    decimal TaxOnProfit,
+    decimal? ComparativeTaxOnProfit,
+    decimal PrepaymentsAndAccruedIncome,
+    decimal? ComparativePrepaymentsAndAccruedIncome,
+    decimal Provisions,
+    decimal? ComparativeProvisions,
+    decimal AccrualsAndDeferredIncome,
+    decimal? ComparativeAccrualsAndDeferredIncome,
+    string? PrincipalActivity,
+    string? AccountingPolicies,
+    int? AverageEmployees,
+    IReadOnlyList<DirectorAdvanceDraft> DirectorAdvances,
+    IReadOnlyList<CommitmentDraft> CommitmentsAndContingencies,
+    DateOnly ApprovedOn,
+    string SigningDirectorCode,
+    string SigningDirectorName);
 
 public sealed record CompanyPeriodSource(
     ReportingWindow Current,

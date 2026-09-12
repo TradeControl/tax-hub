@@ -33,7 +33,8 @@ builder.Services.AddSingleton<SubmissionHistoryValidator>();
 builder.Services.AddSingleton<LiabilityValidator>();
 builder.Services.AddSingleton<PaymentValidator>();
 builder.Services.AddSingleton<HmrcSubmissionRunner>();
-builder.Services.AddSingleton<CompanyAccountsPreviewService>();
+builder.Services.AddSingleton<CompanyAccountsPayloadValidator>();
+builder.Services.AddSingleton<CompanyAccountsRunner>();
 
 var app = builder.Build();
 
