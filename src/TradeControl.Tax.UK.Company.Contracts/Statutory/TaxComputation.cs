@@ -23,6 +23,7 @@ public sealed record CorporationTaxComputation(
     IReadOnlyList<TaxAdjustment> Deductions,
     CapitalAllowanceSchedule CapitalAllowances,
     LossReliefSchedule Losses,
+    decimal ChargeableGains,
     decimal TaxableTotalProfits,
     decimal MainRate,
     decimal CorporationTaxChargeable,

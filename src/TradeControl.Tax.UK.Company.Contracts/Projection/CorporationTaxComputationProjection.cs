@@ -16,6 +16,11 @@ public static class CorporationTaxComputationCatalog
             ["AccountsProfit"] = C("AccountsProfit", "ProfitLossBeforeTax"),
             ["AdjustedTradingProfit"] = C("AdjustedTradingProfit", "AdjustedTradingProfit"),
             ["CapitalAllowances"] = C("CapitalAllowances", "CapitalAllowances"),
+            ["LossesBroughtForward"] = C("LossesBroughtForward", "LossesBroughtForward"),
+            ["LossesCurrentPeriod"] = C("LossesCurrentPeriod", "LossesCurrentPeriod"),
+            ["LossesUsed"] = C("LossesUsed", "LossesUsed"),
+            ["LossesCarriedForward"] = C("LossesCarriedForward", "LossesCarriedForward"),
+            ["ChargeableGains"] = C("ChargeableGains", "ChargeableGains"),
             ["TaxableTotalProfits"] = C("TaxableTotalProfits", "TaxableTotalProfits"),
             ["CorporationTaxChargeable"] = C("CorporationTaxChargeable", "CorporationTaxChargeable"),
             ["TaxPayable"] = C("TaxPayable", "TaxPayable")
@@ -38,6 +43,11 @@ public sealed class CorporationTaxComputationProjection
             F("AccountsProfit", computation.AccountsProfitLossBeforeTax),
             F("AdjustedTradingProfit", computation.AdjustedTradingProfit),
             F("CapitalAllowances", computation.CapitalAllowances.Total),
+            F("LossesBroughtForward", computation.Losses.BroughtForward),
+            F("LossesCurrentPeriod", computation.Losses.CurrentPeriod),
+            F("LossesUsed", computation.Losses.Used),
+            F("LossesCarriedForward", computation.Losses.CarriedForward),
+            F("ChargeableGains", computation.ChargeableGains),
             F("TaxableTotalProfits", computation.TaxableTotalProfits),
             F("CorporationTaxChargeable", computation.CorporationTaxChargeable),
             F("TaxPayable", computation.TaxPayable)

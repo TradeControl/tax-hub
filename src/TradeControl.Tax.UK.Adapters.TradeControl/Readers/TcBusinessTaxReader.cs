@@ -192,4 +192,46 @@ ORDER BY TagCode;
             Versions = versions
         };
     }
+
+    public async Task<TcCorporationTaxProjection> ReadCorporationTaxAsync(
+        string connectionString,
+        DateTime periodStart,
+        DateTime periodEnd,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+SELECT PeriodStart, PeriodEnd, PayOn, NetProfit, CalculatedTaxDue,
+       BusinessTaxAdjustment, BusinessTaxRate, IsUniformTaxRate,
+       StatementTaxDue, StatementTaxPaid, StatementBalance, PreviousLossesCarriedForward,
+       LossesCarriedForward, SnapshotRowVer
+FROM Cash.fnTaxBizComputation(@PeriodStart, @PeriodEnd);
+""";
+        using var connection = _connectionFactory.Create(connectionString);
+        await SqlHelpers.EnsureOpenAsync(connection, cancellationToken);
+        using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@PeriodStart", periodStart.Date);
+        command.Parameters.AddWithValue("@PeriodEnd", periodEnd.Date);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+            throw new InvalidOperationException(
+                $"No Corporation Tax due-date window exists for {periodStart:yyyy-MM-dd} to {periodEnd:yyyy-MM-dd} (exclusive).");
+        var rowVersion = Convert.ToHexString((byte[])reader["SnapshotRowVer"]);
+        return new()
+        {
+            PeriodStart = SqlHelpers.GetDateTime(reader, "PeriodStart"),
+            PeriodEnd = SqlHelpers.GetDateTime(reader, "PeriodEnd"),
+            PayOn = SqlHelpers.GetDateTime(reader, "PayOn"),
+            NetProfit = SqlHelpers.GetDecimal(reader, "NetProfit"),
+            CalculatedTaxDue = SqlHelpers.GetDecimal(reader, "CalculatedTaxDue"),
+            BusinessTaxAdjustment = SqlHelpers.GetDecimal(reader, "BusinessTaxAdjustment"),
+            BusinessTaxRate = reader["BusinessTaxRate"] == DBNull.Value ? null : SqlHelpers.GetDecimal(reader, "BusinessTaxRate"),
+            IsUniformTaxRate = reader.GetBoolean(reader.GetOrdinal("IsUniformTaxRate")),
+            StatementTaxDue = SqlHelpers.GetDecimal(reader, "StatementTaxDue"),
+            StatementTaxPaid = SqlHelpers.GetDecimal(reader, "StatementTaxPaid"),
+            StatementBalance = SqlHelpers.GetDecimal(reader, "StatementBalance"),
+            PreviousLossesCarriedForward = SqlHelpers.GetDecimal(reader, "PreviousLossesCarriedForward"),
+            LossesCarriedForward = SqlHelpers.GetDecimal(reader, "LossesCarriedForward"),
+            Versions = [new("Cash.fnTaxBizComputation", rowVersion, null)]
+        };
+    }
 }

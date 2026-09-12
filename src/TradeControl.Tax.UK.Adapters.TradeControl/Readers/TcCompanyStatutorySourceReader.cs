@@ -117,12 +117,6 @@ public sealed class TcCompanyStatutorySourceReader : ICompanyStatutorySource
         var netAssets = DerivedPair(totalAssets.Current.Value - creditorsAfter.Current.Value - provisions.Current.Value - accruals.Current.Value,
             comparative is null ? null : totalAssets.Comparative!.Value - creditorsAfter.Comparative!.Value - provisions.Comparative!.Value - accruals.Comparative!.Value);
 
-        var profile = context.Profiles.Single(value => value.ReportingTypeCode == "STATUTORY-ACCOUNTS" && value.IsReviewed);
-        string Setting(string code) => context.Settings.Single(value =>
-            value.ProfileCode == profile.ProfileCode && value.SettingCode == code && value.IsReviewed).DisplayValue;
-        if (Setting("ACCOUNTING-STANDARD") != "FRS-105" || Setting("ACCOUNTS-TYPE") != "MICRO-ENTITY")
-            throw new InvalidOperationException("Only the reviewed FRS 105 micro-entity profile is supported.");
-
         var notes = new CompanyNotesSource(
             new(reviewed.PrincipalActivity ?? defaults.PrincipalActivity.Value, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", []),
             new(reviewed.AccountingPolicies ?? defaults.AccountingPolicies.Value, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", []),

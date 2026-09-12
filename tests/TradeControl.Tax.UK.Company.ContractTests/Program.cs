@@ -74,8 +74,24 @@ Assert(typeof(IRenvelope).GetCustomAttributes(false).Any(), "Official generated 
 
 var brokenResult = validator.Validate(ctPackage with { Return = ct600 with { TaxPayable = 1m } });
 Assert(!brokenResult.IsValid && brokenResult.Findings.Any(x => x.Code == "CT005"), "Tax payable mismatch was not rejected.");
+var brokenComputation = computation with { TaxableTotalProfits = computation.TaxableTotalProfits + 1m };
+Assert(validator.Validate(ctPackage with { Computation = brokenComputation }).Findings.Any(x => x.Code == "CT010"),
+    "A computation with unreconciled taxable profits was not rejected.");
+var brokenCharge = computation with { CorporationTaxChargeable = computation.CorporationTaxChargeable + 1m };
+Assert(validator.Validate(ctPackage with { Computation = brokenCharge }).Findings.Any(x => x.Code == "CT012"),
+    "A computation with an irreconcilable Corporation Tax charge was not rejected.");
+var brokenLosses = computation with { Losses = new(100m, 20m, 10m, 200m) };
+Assert(validator.Validate(ctPackage with { Computation = brokenLosses }).Findings.Any(x => x.Code == "CT009"),
+    "An irreconcilable loss schedule was not rejected.");
 var brokenA = ct600 with { SupplementaryPageA = new Ct600A(10000m, 0m, 0m) };
 Assert(validator.Validate(ctPackage with { Return = brokenA }).Findings.Any(x => x.Code == "CT600A001"), "Unsupported CT600A values were not rejected.");
+var negativeA = ct600 with { SupplementaryPageA = new Ct600A(-1m, 0m, 0m) };
+Assert(validator.Validate(ctPackage with { Return = negativeA }).Findings.Any(x => x.Code == "CT600A002"),
+    "Negative CT600A values were not rejected.");
+var noA = ctPackage with { Return = ct600 with { SupplementaryPageA = null } };
+Assert(!XDocument.Parse(Encoding.UTF8.GetString(ctSerializer.Serialize(noA, "CT-CORR-NO-A").Content))
+        .Descendants().Any(x => x.Name.LocalName == "CT600A"),
+    "CT600A was serialized when the supplementary page was not applicable.");
 
 var longPeriod = new ReportingPeriod(new DateOnly(2025, 1, 1), new DateOnly(2026, 6, 30));
 var allocation = CorporationTaxPeriodAllocation.Split(longPeriod);
@@ -117,7 +133,7 @@ catch (UnsupportedStatutoryScenarioException ex)
     Assert(ex.Scenario == "group accounts", "Unsupported scenario identity was lost.");
 }
 
-Console.WriteLine($"Company Objective 3 contract tests passed ({assertions} assertions).\n" +
+Console.WriteLine($"Company contract tests passed ({assertions} assertions).\n" +
     $"Artifacts: accounts={fullIx.Sha256}, computation={computationIx.Sha256}, CH={chXml.Sha256}, CT={ctXml.Sha256}");
 
 void Assert(bool condition, string message)
@@ -148,4 +164,4 @@ static CorporationTaxComputation FixtureComputation(ReportingPeriod period) => n
     [new TaxAdjustment("Non-trading income", 1000m)],
     new CapitalAllowanceSchedule(2000m, 0m, 0m),
     new LossReliefSchedule(0m, 0m, 0m, 0m),
-    30000m, 0.19m, 5700m, 0m, 5700m);
+    0m, 30000m, 0.19m, 5700m, 0m, 5700m);

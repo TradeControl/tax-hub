@@ -89,18 +89,20 @@ public sealed record CompanyAccountsDraftDefaults(
         if (context.Identity.BusinessTaxTypeCode != 0)
             throw new InvalidOperationException("Company accounts defaults require a company context.");
 
-        var accountsProfile = context.Profiles.Single(profile =>
-            profile.ReportingTypeCode == "STATUTORY-ACCOUNTS" && profile.IsReviewed);
-        var policies = context.Settings.Single(setting =>
+        var accountsProfile = context.Profiles.FirstOrDefault(profile =>
+            profile.ReportingTypeCode == "STATUTORY-ACCOUNTS");
+        var policies = accountsProfile is null ? null : context.Settings.FirstOrDefault(setting =>
             setting.ProfileCode == accountsProfile.ProfileCode
-            && setting.SettingCode == "ACCOUNTING-POLICIES"
-            && setting.IsReviewed);
+            && setting.SettingCode == "ACCOUNTING-POLICIES");
 
         return new(
             new(context.Identity.BusinessDescription ?? string.Empty,
                 SuggestedValueOrigin.Source, "Subject.tbVirtual.BusinessDescription"),
-            new(policies.DisplayValue,
-                SuggestedValueOrigin.Source, "Cash.tbReportingProfileSetting:ACCOUNTING-POLICIES"),
+            policies is null
+                ? new("These accounts use the historical-cost basis and FRS 105.",
+                    SuggestedValueOrigin.Default, "SubmissionDefault")
+                : new(policies.DisplayValue,
+                    SuggestedValueOrigin.Source, "Cash.tbReportingProfileSetting:ACCOUNTING-POLICIES"),
             new(context.Identity.NumberOfEmployees,
                 SuggestedValueOrigin.Default, "Subject.tbVirtual.NumberOfEmployees"),
             new(context.BusinessTaxWindow,
@@ -145,9 +147,8 @@ public sealed record CorporationTaxDraftDefaults(
 {
     public static CorporationTaxDraftDefaults Create(StatutoryContextSnapshot context)
     {
-        if (context.Identity.BusinessTaxTypeCode != 0
-            || !context.Profiles.Any(profile => profile.ReportingTypeCode == "COMPANY-TAX" && profile.IsReviewed))
-            throw new InvalidOperationException("Corporation Tax defaults require a reviewed company profile.");
+        if (context.Identity.BusinessTaxTypeCode != 0)
+            throw new InvalidOperationException("Corporation Tax defaults require a company context.");
 
         return new(
             new(context.BusinessTaxWindow, SuggestedValueOrigin.Default, "Cash.fnTaxTypeDueDates"),

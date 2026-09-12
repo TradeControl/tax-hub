@@ -35,6 +35,8 @@ builder.Services.AddSingleton<PaymentValidator>();
 builder.Services.AddSingleton<HmrcSubmissionRunner>();
 builder.Services.AddSingleton<CompanyAccountsPayloadValidator>();
 builder.Services.AddSingleton<CompanyAccountsRunner>();
+builder.Services.AddSingleton<CorporationTaxPayloadValidator>();
+builder.Services.AddSingleton<CorporationTaxRunner>();
 
 var app = builder.Build();
 

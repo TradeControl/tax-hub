@@ -47,6 +47,12 @@ public sealed class CompanyContractValidator
     public ContractValidationResult Validate(CorporationTaxReturnPackage package)
     {
         var f = new List<ValidationFinding>();
+        var computation = package.Computation;
+        var expectedTaxableProfits = Math.Max(0m,
+            computation.AdjustedTradingProfit + computation.ChargeableGains - computation.Losses.Used);
+        var expectedChargeable = decimal.Round(
+            expectedTaxableProfits * computation.MainRate, 5, MidpointRounding.AwayFromZero);
+        var expectedPayable = Math.Max(0m, expectedChargeable - computation.Reliefs);
         Add(package.Return.Period != package.Computation.CorporationTaxPeriod, "CT001", "CT600 and computation periods differ.", "Return.Period");
         Add(package.Return.ProfitBeforeTax != package.Computation.AccountsProfitLossBeforeTax, "CT002", "CT600 profit does not reconcile to computation.", "Return.ProfitBeforeTax");
         Add(package.Return.TaxableTotalProfits != package.Computation.TaxableTotalProfits, "CT003", "Taxable total profits do not reconcile.", "Return.TaxableTotalProfits");
@@ -54,8 +60,24 @@ public sealed class CompanyContractValidator
         Add(package.Return.TaxPayable != package.Computation.TaxPayable, "CT005", "Tax payable does not reconcile.", "Return.TaxPayable");
         Add(!package.Return.AccountsAttached || package.AccountsDocument.Content.Length == 0, "CT006", "A non-empty accounts iXBRL attachment is required.", "AccountsDocument");
         Add(!package.Return.ComputationsAttached || package.ComputationDocument.Content.Length == 0, "CT007", "A non-empty computation iXBRL attachment is required.", "ComputationDocument");
+        Add(computation.CorporationTaxPeriod.InclusiveDays > 366, "CT008", "A Corporation Tax period cannot exceed twelve months.", "Computation.CorporationTaxPeriod");
+        Add(computation.Losses.BroughtForward + computation.Losses.CurrentPeriod - computation.Losses.Used != computation.Losses.CarriedForward,
+            "CT009", "The loss-relief schedule does not reconcile.", "Computation.Losses");
+        Add(computation.TaxableTotalProfits != expectedTaxableProfits,
+            "CT010", "Taxable total profits do not reconcile to adjusted profit, gains and losses used.", "Computation.TaxableTotalProfits");
+        Add(computation.MainRate is < 0m or > 1m, "CT011", "The Corporation Tax rate must be between zero and one.", "Computation.MainRate");
+        Add(computation.CorporationTaxChargeable != expectedChargeable,
+            "CT012", "Corporation Tax chargeable does not reconcile to taxable profits and rate.", "Computation.CorporationTaxChargeable");
+        Add(computation.TaxPayable != expectedPayable,
+            "CT013", "Tax payable does not reconcile to Corporation Tax chargeable and reliefs.", "Computation.TaxPayable");
+        Add(package.Return.DeclarationDate < package.Return.Period.End,
+            "CT014", "The CT600 declaration cannot precede the return period end.", "Return.DeclarationDate");
         if (package.Return.SupplementaryPageA is { } a)
+        {
             Add(a.LoansOutstandingAtPeriodEnd > 0 && a.TaxChargeable <= 0, "CT600A001", "Loans outstanding require a positive section 455 charge in the supported profile.", "Return.SupplementaryPageA.TaxChargeable");
+            Add(a.LoansOutstandingAtPeriodEnd < 0 || a.TaxChargeable < 0 || a.TaxPaid < 0,
+                "CT600A002", "CT600A monetary values cannot be negative.", "Return.SupplementaryPageA");
+        }
         return new(f);
         void Add(bool condition, string code, string message, string path) { if (condition) f.Add(new(ValidationSeverity.Error, code, message, path, "CT600-RIM-1.994-supported-profile")); }
     }

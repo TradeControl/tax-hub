@@ -69,3 +69,21 @@ public sealed class TcCumulativeProjectionValue
     public TcTaxSupportStatus SupportStatus { get; init; }
     public decimal? StatutoryAmount { get; init; }
 }
+
+public sealed class TcCorporationTaxProjection
+{
+    public DateTime PeriodStart { get; init; }
+    public DateTime PeriodEnd { get; init; }
+    public DateTime PayOn { get; init; }
+    public decimal NetProfit { get; init; }
+    public decimal CalculatedTaxDue { get; init; }
+    public decimal BusinessTaxAdjustment { get; init; }
+    public decimal? BusinessTaxRate { get; init; }
+    public bool IsUniformTaxRate { get; init; }
+    public decimal StatementTaxDue { get; init; }
+    public decimal StatementTaxPaid { get; init; }
+    public decimal StatementBalance { get; init; }
+    public decimal PreviousLossesCarriedForward { get; init; }
+    public decimal LossesCarriedForward { get; init; }
+    public IReadOnlyList<SourceVersion> Versions { get; init; } = [];
+}

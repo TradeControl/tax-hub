@@ -30,6 +30,58 @@ Accept: application/xhtml+xml
 
 ###
 
+POST {{TaxHub.WebHarness_HostAddress}}/api/company/corporation-tax
+Content-Type: application/json
+Accept: application/xml
+
+{
+  "sqlConnection": "Server=localhost;Database=TradeControl;Trusted_Connection=True;Encrypt=False",
+  "pilot": "corporation-tax",
+  "asOfDate": "2026-09-12",
+  "accountsPeriod": { "start": "2026-04-01", "end": "2027-03-31" },
+  "correlationId": "CT-PREVIEW-0001",
+  "identity": {
+    "companyNumber": "12345678",
+    "utr": "1234567890"
+  },
+  "accounts": {
+    "membersHaveNotRequiredAudit": true,
+    "directorsAcknowledgeResponsibilities": true,
+    "comparativeTaxOnProfit": 0,
+    "prepaymentsAndAccruedIncome": 0,
+    "comparativePrepaymentsAndAccruedIncome": 0,
+    "provisions": 0,
+    "comparativeProvisions": 0,
+    "accrualsAndDeferredIncome": 0,
+    "comparativeAccrualsAndDeferredIncome": 0,
+    "approvedOn": "2027-04-30",
+    "signingDirectorCode": "DIRECTOR-1",
+    "signingDirectorName": "Synthetic Director"
+  },
+  "periods": [
+    {
+      "period": { "start": "2026-04-01", "end": "2027-03-31" },
+      "otherAddBacks": [],
+      "deductions": [],
+      "capitalAllowances": {
+        "writingDownAllowance": 0,
+        "annualInvestmentAllowance": 0,
+        "otherAllowances": 0
+      },
+      "lossesUsed": 0,
+      "chargeableGains": 0,
+      "otherReliefs": 0,
+      "loansToParticipators": null
+    }
+  ],
+  "declaration": {
+    "declarantName": "Synthetic Director",
+    "declarationDate": "2027-04-30"
+  }
+}
+
+###
+
 POST {{TaxHub.WebHarness_HostAddress}}/harness/mtd/micro
 Content-Type: application/json
 

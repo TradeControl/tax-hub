@@ -139,10 +139,39 @@ public interface ICompanyStatutorySource
 
 public sealed record CorporationTaxProjectionRequest(
     DateOnly AccountsPeriodEnd,
-    DateOnly AsOfDate);
+    DateOnly AsOfDate,
+    ReportingWindow? AccountsPeriod,
+    CorporationTaxReviewedInput ReviewedInput);
+
+public sealed record CorporationTaxReviewedInput(
+    string? CompanyNumber,
+    string Utr,
+    IReadOnlyList<CorporationTaxPeriodReviewedInput> Periods,
+    string DeclarantName,
+    DateOnly DeclarationDate);
+
+public sealed record CorporationTaxPeriodReviewedInput(
+    ReportingWindow Period,
+    IReadOnlyList<TaxAdjustmentDraft> OtherAddBacks,
+    IReadOnlyList<TaxAdjustmentDraft> Deductions,
+    CapitalAllowanceDraft CapitalAllowances,
+    decimal LossesUsed,
+    decimal ChargeableGains,
+    decimal OtherReliefs,
+    LoansToParticipatorsDraft? LoansToParticipators);
+
+public sealed record LoansToParticipatorsDraft(
+    decimal LoansOutstandingAtPeriodEnd,
+    decimal TaxChargeable,
+    decimal TaxPaid);
+
+public sealed record CorporationTaxDeclarationSource(
+    StatutorySourceValue<string> DeclarantName,
+    StatutorySourceValue<DateOnly> DeclarationDate);
 
 public sealed record CorporationTaxPeriodSource(
     ReportingWindow Period,
+    StatutorySourceValue<decimal> Turnover,
     StatutorySourceValue<decimal> AccountsProfitLossBeforeTax,
     IReadOnlyList<StatutorySourceValue<TaxAdjustmentDraft>> AddBacks,
     IReadOnlyList<StatutorySourceValue<TaxAdjustmentDraft>> Deductions,
@@ -154,14 +183,18 @@ public sealed record CorporationTaxPeriodSource(
     StatutorySourceValue<decimal> CorporationTaxChargeable,
     StatutorySourceValue<decimal> OtherReliefs,
     StatutorySourceValue<decimal> TaxPayable,
-    StatutorySourceValue<decimal> TaxPaid);
+    StatutorySourceValue<decimal> TaxPaid,
+    StatutorySourceValue<decimal> StatementBalance,
+    StatutorySourceValue<LoansToParticipatorsDraft?> LoansToParticipators);
 
 public sealed record CorporationTaxSource(
     string SubjectCode,
+    string CompanyName,
     string CompanyNumber,
-    string UtrDisplayValue,
+    string Utr,
     ReportingWindow AccountsPeriod,
     IReadOnlyList<CorporationTaxPeriodSource> CorporationTaxPeriods,
+    CorporationTaxDeclarationSource Declaration,
     IReadOnlyList<SourceVersion> Versions);
 
 public interface ICorporationTaxSource
