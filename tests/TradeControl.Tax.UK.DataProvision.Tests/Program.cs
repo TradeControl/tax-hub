@@ -10,10 +10,11 @@ NativeTestProcess.SetErrorMode(NativeTestProcess.SemNoGpFaultErrorBox);
 CompanySourceBoundaryTests.Run();
 CompanyAccountsPopulationTests.Run();
 PreparedArtifactTests.Run();
+await CorporateHandoffTests.RunAsync();
 
 if (args.Contains("--offline", StringComparer.OrdinalIgnoreCase))
 {
-    Console.WriteLine("CO1 source-boundary and CO2 prepared-artifact verification passed (offline).");
+    Console.WriteLine("CO1 source-boundary, CO2 prepared-artifact and CO6 corporate handoff verification passed (offline).");
     return;
 }
 

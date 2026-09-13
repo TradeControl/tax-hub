@@ -48,6 +48,12 @@ Assert(chXml.Content.SequenceEqual(chSerializer.Serialize(chPackage).Content), "
 var chDocument = XDocument.Parse(Encoding.UTF8.GetString(chXml.Content));
 Assert(chDocument.Descendants().Any(x => x.Name.LocalName == "CompanyNumber" && x.Value == "01234567"), "Companies House company number is absent.");
 Assert(chDocument.Descendants().Any(x => x.Name.LocalName == "Delivery" && x.Value == "Filleted"), "Companies House delivery profile is absent.");
+Assert(chDocument.Descendants().Any(x => x.Name.LocalName == "AccountsPreparedInAccordanceWithMicroEntityProvisions" && x.Value == "true"),
+    "Companies House micro-entity statement is absent.");
+Assert(validator.Validate(chPackage).IsValid, "Valid Companies House filing package was rejected.");
+var invalidChPackage = chPackage with { Filing = chFiling with { Statements = new(false, true, true) } };
+Assert(validator.Validate(invalidChPackage).Findings.Any(x => x.Code == "CH004"),
+    "A missing Companies House micro-entity statement was not rejected.");
 Assert(CompaniesHouseEndpointSet.SubmitAccounts.RequiresStatusPolling, "Companies House submission must expose polling semantics.");
 
 var computation = FixtureComputation(accounts.Period);
@@ -107,9 +113,20 @@ Assert(CompanyContractCatalog.Sources.All(x => x.Sha256.Length == 64), "A source
 Assert(CompanyContractCatalog.Ct600V1994.Version == "1.994", "CT600 provenance version changed.");
 Assert(CompanyContractCatalog.CompaniesHouseTis59.Version == "5.9", "Companies House provenance version changed.");
 Assert(CompanyContractRegistry.SelectProduction("hmrc-ct600", new DateOnly(2026, 4, 7)).Version == "1.994", "Effective-date version selection failed.");
+Assert(CompanyContractRegistry.SelectForPreview("companies-house-accounts", "TIS-5.9", new DateOnly(2026, 9, 13)).Status == ContractStatus.Production,
+    "The effective Companies House production contract was not selected for preview.");
+Assert(CompanyContractRegistry.SelectForPreview("companies-house-accounts", "future-api", new DateOnly(2026, 9, 13), true).Status == ContractStatus.Preview,
+    "Explicit future-contract preview opt-in was rejected.");
+AssertUnsupported(() => CompanyContractRegistry.SelectForPreview("companies-house-accounts", "future-api", new DateOnly(2026, 9, 13)),
+    "A future Companies House contract was selected without preview opt-in.");
+AssertUnsupported(() => CompanyContractRegistry.SelectForPreview("companies-house-accounts", "TIS-5.9", new DateOnly(2026, 3, 31)),
+    "TIS 5.9 was selected before its effective date.");
+AssertUnsupported(() => CompanyContractRegistry.SelectForPreview("companies-house-accounts", "unknown", new DateOnly(2026, 9, 13), true),
+    "An unregistered Companies House contract was selected.");
 Assert(!CompanyContractRegistry.CompaniesHouseReplacement.SubmissionReady && CompanyContractRegistry.CompaniesHouseReplacement.Status == ContractStatus.Preview,
     "Future Companies House contract became production-selectable.");
 Assert(!CompanyContractRegistry.HmrcComputationTaxonomy2025.SubmissionReady, "Derived computation QNames were incorrectly marked submission-ready.");
+Assert(CompanyServiceCoverageCatalog.Services.All(x => Enum.IsDefined(x.Disposition)), "A corporate service has no coverage disposition.");
 
 var manifestPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "manifest.json");
 Assert(File.Exists(manifestPath) && File.ReadAllText(manifestPath).Contains("CT600", StringComparison.OrdinalIgnoreCase), "Offline fixture manifest was not deployed.");
@@ -140,6 +157,21 @@ void Assert(bool condition, string message)
 {
     assertions++;
     if (!condition) throw new InvalidOperationException(message);
+}
+
+void AssertUnsupported(Action action, string message)
+{
+    try
+    {
+        action();
+    }
+    catch (UnsupportedStatutoryScenarioException)
+    {
+        assertions++;
+        return;
+    }
+
+    throw new InvalidOperationException(message);
 }
 
 static StatutoryAccounts FixtureAccounts()

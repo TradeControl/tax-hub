@@ -1,6 +1,7 @@
 using TradeControl.Tax.UK.Company.Statutory;
 using TradeControl.Tax.UK.Company.Xbrl;
 using TradeControl.Tax.UK.Hmrc.CorporationTax.Submission.V2026;
+using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis5_9;
 
 namespace TradeControl.Tax.UK.Company.Validation;
 
@@ -15,6 +16,22 @@ public sealed record ContractValidationResult(IReadOnlyList<ValidationFinding> F
 
 public sealed class CompanyContractValidator
 {
+    public ContractValidationResult Validate(CompaniesHouseFilingPackage package)
+    {
+        var f = new List<ValidationFinding>();
+        var filing = package.Filing;
+        Add(string.IsNullOrWhiteSpace(package.EnvelopeNumber), "CH001", "An envelope number is required.", "EnvelopeNumber");
+        Add(filing.AccountsDocument.Content.Length == 0, "CH002", "A non-empty accounts iXBRL document is required.", "Filing.AccountsDocument");
+        Add(!filing.Statements.AccountsPreparedInAccordanceWithMicroEntityProvisions,
+            "CH004", "The supported filing profile requires the micro-entity provisions statement.", "Filing.Statements");
+        Add(!filing.Statements.MembersHaveNotRequiredAudit,
+            "CH005", "The supported filing profile requires the audit-exemption statement.", "Filing.Statements");
+        Add(!filing.Statements.DirectorsAcknowledgeResponsibilities,
+            "CH006", "The supported filing profile requires the directors' responsibilities statement.", "Filing.Statements");
+        return new(f);
+        void Add(bool condition, string code, string message, string path) { if (condition) f.Add(new(ValidationSeverity.Error, code, message, path, "Companies-House-TIS-5.9-supported-profile")); }
+    }
+
     public ContractValidationResult Validate(StatutoryAccounts accounts)
     {
         var f = new List<ValidationFinding>();

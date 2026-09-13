@@ -33,6 +33,10 @@ public sealed class CompaniesHouseEnvelopeSerializer
                     new XElement(Accounts + "AccountsPeriodEnd", filing.Accounts.Period.End.ToString("yyyy-MM-dd")),
                     new XElement(Accounts + "AccountsType", "MicroEntity"),
                     new XElement(Accounts + "Delivery", filing.Delivery.ToString()),
+                    new XElement(Accounts + "RegistrarStatements",
+                        new XElement(Accounts + "AccountsPreparedInAccordanceWithMicroEntityProvisions", filing.Statements.AccountsPreparedInAccordanceWithMicroEntityProvisions),
+                        new XElement(Accounts + "MembersHaveNotRequiredAudit", filing.Statements.MembersHaveNotRequiredAudit),
+                        new XElement(Accounts + "DirectorsAcknowledgeResponsibilities", filing.Statements.DirectorsAcknowledgeResponsibilities)),
                     new XElement(Accounts + "AccountsData", Convert.ToBase64String(filing.AccountsDocument.Content))))));
 
         using var stream = new MemoryStream();

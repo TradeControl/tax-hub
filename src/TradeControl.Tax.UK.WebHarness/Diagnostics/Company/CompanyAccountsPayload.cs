@@ -4,7 +4,7 @@ using TradeControl.Tax.UK.Application.DataProvision;
 
 namespace TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
 
-public sealed class CompanyAccountsPayload
+public class CompanyAccountsPayload
 {
     public string SqlConnection { get; set; } = string.Empty;
     public string Pilot { get; set; } = string.Empty;
@@ -17,6 +17,21 @@ public sealed class CompanyAccountsPayload
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+public sealed class CompaniesHouseAccountsPayload : CompanyAccountsPayload
+{
+    public CompaniesHouseFilingPayload Filing { get; set; } = new();
+}
+
+public sealed class CompaniesHouseFilingPayload
+{
+    public string EnvelopeNumber { get; set; } = string.Empty;
+    public string ContractVersion { get; set; } = "TIS-5.9";
+    public bool AllowPreviewContract { get; set; }
+    public bool AccountsPreparedInAccordanceWithMicroEntityProvisions { get; set; } = true;
+    public bool MembersHaveNotRequiredAudit { get; set; } = true;
+    public bool DirectorsAcknowledgeResponsibilities { get; set; } = true;
 }
 
 public sealed class CompanyAccountsReviewPayload

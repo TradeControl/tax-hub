@@ -36,6 +36,32 @@ public static class CompanyContractRegistry
         return match ?? throw new UnsupportedStatutoryScenarioException($"No production {contractId} contract is effective on {on:yyyy-MM-dd}.");
     }
 
+    public static VersionedContract SelectForPreview(
+        string contractId,
+        string version,
+        DateOnly on,
+        bool allowPreviewContract = false)
+    {
+        var match = All.SingleOrDefault(x =>
+            string.Equals(x.ContractId, contractId, StringComparison.OrdinalIgnoreCase)
+            && string.Equals(x.Version, version, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+            throw new UnsupportedStatutoryScenarioException($"Contract {contractId} {version} is not registered.");
+
+        if (match.Status == ContractStatus.Production)
+        {
+            if (match.EffectiveFrom > on || match.EffectiveTo is not null && on > match.EffectiveTo)
+                throw new UnsupportedStatutoryScenarioException($"Contract {contractId} {version} is not effective on {on:yyyy-MM-dd}.");
+            return match;
+        }
+
+        if (match.Status == ContractStatus.Preview && allowPreviewContract)
+            return match;
+
+        throw new UnsupportedStatutoryScenarioException(
+            $"Contract {contractId} {version} has status {match.Status} and requires explicit preview opt-in.");
+    }
+
     public static IReadOnlyList<VersionedContract> All { get; } =
         [CompaniesHouseAccountsTis59, CompaniesHouseReplacement, HmrcCt600V1994, HmrcComputationTaxonomy2025];
 }

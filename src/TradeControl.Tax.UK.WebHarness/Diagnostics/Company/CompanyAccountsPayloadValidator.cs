@@ -4,7 +4,7 @@ namespace TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
 
 public sealed class CompanyAccountsPayloadValidator
 {
-    public CompanyAccountsPayloadValidation Validate(CompanyAccountsPayload? payload)
+    public CompanyAccountsPayloadValidation Validate(CompanyAccountsPayload? payload, string expectedPilot = "company-accounts")
     {
         var errors = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         void Add(string field, string message)
@@ -26,8 +26,8 @@ public sealed class CompanyAccountsPayloadValidator
             try { _ = new SqlConnectionStringBuilder(payload.SqlConnection); }
             catch (ArgumentException) { Add("sqlConnection", "The SQL connection string is invalid."); }
         }
-        if (!string.Equals(payload.Pilot, "company-accounts", StringComparison.OrdinalIgnoreCase))
-            Add("pilot", "Pilot must be 'company-accounts'.");
+        if (!string.Equals(payload.Pilot, expectedPilot, StringComparison.OrdinalIgnoreCase))
+            Add("pilot", $"Pilot must be '{expectedPilot}'.");
         if (payload.Profile is not ("full" or "filleted"))
             Add("profile", "Profile must be 'full' or 'filleted'.");
         if (payload.Extra is { Count: > 0 })

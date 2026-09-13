@@ -82,6 +82,44 @@ Accept: application/xml
 
 ###
 
+POST {{TaxHub.WebHarness_HostAddress}}/api/company/companies-house/accounts
+Content-Type: application/json
+Accept: application/xml
+
+{
+  "sqlConnection": "Server=localhost;Database=TradeControl;Trusted_Connection=True;Encrypt=False",
+  "pilot": "companies-house-accounts",
+  "profile": "filleted",
+  "asOfDate": "2026-09-12",
+  "isFirstAccountsPeriod": false,
+  "review": {
+    "companyNumber": "12345678",
+    "membersHaveNotRequiredAudit": true,
+    "directorsAcknowledgeResponsibilities": true,
+    "taxOnProfit": 0,
+    "comparativeTaxOnProfit": 0,
+    "prepaymentsAndAccruedIncome": 0,
+    "comparativePrepaymentsAndAccruedIncome": 0,
+    "provisions": 0,
+    "comparativeProvisions": 0,
+    "accrualsAndDeferredIncome": 0,
+    "comparativeAccrualsAndDeferredIncome": 0,
+    "approvedOn": "2027-04-30",
+    "signingDirectorCode": "DIRECTOR-1",
+    "signingDirectorName": "Synthetic Director"
+  },
+  "filing": {
+    "envelopeNumber": "CH-PREVIEW-0001",
+    "contractVersion": "TIS-5.9",
+    "allowPreviewContract": false,
+    "accountsPreparedInAccordanceWithMicroEntityProvisions": true,
+    "membersHaveNotRequiredAudit": true,
+    "directorsAcknowledgeResponsibilities": true
+  }
+}
+
+###
+
 POST {{TaxHub.WebHarness_HostAddress}}/harness/mtd/micro
 Content-Type: application/json
 
