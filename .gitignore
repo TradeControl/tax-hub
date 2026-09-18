@@ -362,6 +362,9 @@ MigrationBackup/
 # Fody - auto-generated XML schema
 FodyWeavers.xsd
 
+# Local developer configuration and test credentials
+.local/
+
 # Trade Control
 docs/tmp/
 .aider*

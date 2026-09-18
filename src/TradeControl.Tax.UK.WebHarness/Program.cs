@@ -8,6 +8,8 @@ using TradeControl.Tax.UK.WebHarness.Diagnostics.Payloads;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Runner;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Validation;
+using TradeControl.Tax.UK.WebHarness.Diagnostics.Preparation;
+using TradeControl.Tax.UK.Application.Preparation;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -19,11 +21,11 @@ builder.Services.AddSwaggerGen(c =>
 });
 
 builder.Services.AddSingleton<ConnectionFactory>();
+builder.Services.AddSingleton<PreparedApiRequestPipeline>();
+builder.Services.AddSingleton<VatPreparationStore>();
 builder.Services.AddSingleton<SubmissionLogger>();
 builder.Services.AddSingleton<TagMapper>();
 builder.Services.AddSingleton<CategoryMapper>();
-builder.Services.AddSingleton<TcVatReader>();
-builder.Services.AddSingleton<TcBusinessTaxReader>();
 builder.Services.AddSingleton<VatHarnessPayloadBuilder>();
 builder.Services.AddSingleton<MicroHarnessPayloadBuilder>();
 builder.Services.AddSingleton<VatValidator>();

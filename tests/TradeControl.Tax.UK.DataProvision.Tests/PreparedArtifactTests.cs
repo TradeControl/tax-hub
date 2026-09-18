@@ -1,7 +1,10 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Reflection;
 using TradeControl.Tax.UK.Application.DataProvision;
 using TradeControl.Tax.UK.Application.Preparation;
+using TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.Shared;
+using TradeControl.Tax.UK.Hmrc.Vat;
 
 internal static class PreparedArtifactTests
 {
@@ -19,20 +22,7 @@ internal static class PreparedArtifactTests
         Assert(artifact.Sha256 == Convert.ToHexString(SHA256.HashData(artifact.Content.AsSpan())),
             "The digest was not calculated over the final stored bytes.");
 
-        var request = new PreparedApiRequest(
-            artifact, "post", "/organisations/vat/returns",
-            [new("periodKey", "24A1"), new("finalised", "true")],
-            [new("Accept", "application/json"), new("Content-Type", "application/json")]);
-        Assert(request.Method == "POST" && request.Query[0].Name == "periodKey"
-            && request.Query[1].Name == "finalised",
-            "Prepared request ordering was not retained.");
-
-        AssertRejected(() => new PreparedApiRequest(
-            artifact, "POST", "https://example.test/returns"),
-            "A prepared request accepted a base address.");
-        AssertRejected(() => new PreparedApiRequest(
-            artifact, "POST", "/returns", headers: [new("Authorization", "Bearer secret")]),
-            "A prepared request accepted credentials.");
+        PreparedApiRequestMechanics();
 
         var document = PreparedStatutoryArtifact.Create(
             "GB", "COMPANIES-HOUSE", "STATUTORY-ACCOUNTS", "TIS5.9",
@@ -51,6 +41,76 @@ internal static class PreparedArtifactTests
             "The transmitted envelope was conflated with its inspectable document.");
     }
 
+    private static void PreparedApiRequestMechanics()
+    {
+        var pipeline = new PreparedApiRequestPipeline();
+        var vatDescriptor = VatOperationCatalog.All.Single(item => item.OperationId == "vat.returns.submit");
+        var body = Encoding.UTF8.GetBytes("{\"finalised\":true}");
+        var request = pipeline.Prepare(HmrcPreparedApiContracts.From(vatDescriptor),
+            [new("vrn", "123 456/789")], serializeBody: () => body,
+            sourceEvidence: [new("TradeControl", "Cash.vwTaxVatSubmission", "0x01")],
+            validationStages: [new("source", () => [])]);
+        body[0] = 0;
+        Assert(request.OperationId == "vat.returns.submit" && request.Method == "POST"
+            && request.RelativePath == "/organisations/vat/123%20456%2F789/returns"
+            && request.Headers.Select(item => item.Name).SequenceEqual(["Accept", "Content-Type"]),
+            "Prepared VAT request metadata, escaping or contract headers are incorrect.");
+        Assert(request.BodyBytes.HasValue
+            && Encoding.UTF8.GetString(request.BodyBytes.Value.AsSpan()) == "{\"finalised\":true}"
+            && request.BodySha256 == Convert.ToHexString(SHA256.HashData(request.BodyBytes.Value.AsSpan())),
+            "Prepared request bytes are mutable or its digest was not calculated over stored bytes.");
+
+        var obligations = VatOperationCatalog.All.Single(item => item.OperationId == "vat.obligations.list");
+        var bodyless = pipeline.Prepare(HmrcPreparedApiContracts.From(obligations), [new("vrn", "123456789")],
+            [new("status", "O"), new("to", "2026-06-30"), new("from", "2026-04-01")]);
+        Assert(!bodyless.HasBody && bodyless.BodySha256 is null && bodyless.ContentType is null
+            && bodyless.Query.Select(item => item.Name).SequenceEqual(["from", "to", "status"]),
+            "Bodyless or ordered-query mechanics are incorrect.");
+
+        var cumulative = SaOperationCatalog.Coverage.Single(item =>
+            ReferenceEquals(item.Descriptor, TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.SelfEmployment.V5.Cumulative.CumulativeEndpoints.Put));
+        var blocked = pipeline.Prepare(HmrcPreparedApiContracts.From(cumulative),
+            [new("nino", "AA123456A"), new("businessId", "XAIS123"), new("taxYear", "2026-27")],
+            serializeBody: () => throw new InvalidOperationException("Serialization must not run after validation failure."),
+            validationStages: [new("readiness", () => [new(PreparedFindingSeverity.Error, "NOT-READY", "Source is not ready.")])]);
+        Assert(blocked.HasErrors && !blocked.HasBody && blocked.BodySha256 is null,
+            "Blocking validation did not suppress body serialization and digest creation.");
+
+        AssertRejected(() => pipeline.Prepare(HmrcPreparedApiContracts.From(vatDescriptor), [], serializeBody: () => []),
+            "A missing path value was accepted.");
+        AssertRejected(() => pipeline.Prepare(HmrcPreparedApiContracts.From(obligations),
+                [new("vrn", "1"), new("vrn", "2")]),
+            "A duplicate path value was accepted.");
+        AssertRejected(() => pipeline.Prepare(HmrcPreparedApiContracts.From(obligations),
+                [new("vrn", "1")], [new("unknown", "value")]),
+            "An unknown query value was accepted.");
+        AssertRejected(() => pipeline.Prepare(HmrcPreparedApiContracts.From(obligations),
+                [new("vrn", "1")], serializeBody: () => Encoding.UTF8.GetBytes("{}")),
+            "A bodyless operation accepted invented body bytes.");
+
+        var gateway = new FakeGateway();
+        gateway.SendAsync(request).GetAwaiter().GetResult();
+        Assert(ReferenceEquals(gateway.Received, request),
+            "The gateway did not receive the prepared request unchanged.");
+
+        var forbidden = new[] { "BaseAddress", "OAuth", "Token", "ConnectionString", "Fraud", "Response" };
+        var publicMembers = typeof(PreparedApiRequest).GetMembers(BindingFlags.Instance | BindingFlags.Public)
+            .Select(member => member.Name).ToArray();
+        Assert(forbidden.All(term => publicMembers.All(name => !name.Contains(term, StringComparison.OrdinalIgnoreCase))),
+            "Prepared API requests expose a forbidden transport, credential, source-connection or response concern.");
+    }
+
+    private sealed class FakeGateway : IPreparedApiRequestGateway
+    {
+        public PreparedApiRequest? Received { get; private set; }
+        public Task SendAsync(PreparedApiRequest request, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Received = request;
+            return Task.CompletedTask;
+        }
+    }
+
     private static void AssertRejected(Action action, string message)
     {
         try
@@ -58,6 +118,10 @@ internal static class PreparedArtifactTests
             action();
         }
         catch (ArgumentException)
+        {
+            return;
+        }
+        catch (InvalidOperationException)
         {
             return;
         }

@@ -1,6 +1,8 @@
 using TradeControl.Tax.UK.WebHarness.Requests.Payloads;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Mapping;
 using TradeControl.Tax.UK.Adapters.TradeControl.Data;
+using TradeControl.Tax.UK.Adapters.TradeControl.Readers;
+using TradeControl.Tax.Data;
 
 namespace TradeControl.Tax.UK.WebHarness.Diagnostics.Payloads;
 
@@ -20,12 +22,12 @@ public sealed class MicroHarnessPayloadBuilder
         "CP46"
     ];
 
-    private readonly TcBusinessTaxReader _reader;
+    private readonly ConnectionFactory _connections;
     private readonly TagMapper _tagMapper;
 
-    public MicroHarnessPayloadBuilder(TcBusinessTaxReader reader, TagMapper tagMapper)
+    public MicroHarnessPayloadBuilder(ConnectionFactory connections, TagMapper tagMapper)
     {
-        _reader = reader;
+        _connections = connections;
         _tagMapper = tagMapper;
     }
 
@@ -36,21 +38,23 @@ public sealed class MicroHarnessPayloadBuilder
         DateTime periodTo,
         CancellationToken cancellationToken = default)
     {
-        var rows = await _reader.ReadAsync(connectionString, taxSourceCode, periodTo, cancellationToken);
-        if (rows.Count == 0)
-        {
-            throw new InvalidOperationException("No MICRO dataset rows were found for the requested period.");
-        }
-
-        var periodFrom = rows.Min(x => x.PeriodFrom);
-        var items = _tagMapper.MapBusinessTaxItems(rows, Tags);
+        var end = DateOnly.FromDateTime(periodTo);
+        var context = await new TcStatutoryContextReader(_connections, connectionString).ReadAsync(end, cancellationToken);
+        var period = new TaxReportingPeriod(context.BusinessTaxWindow.Start, end, TaxPeriodKind.Cumulative,
+            $"MTD-{end:yyyy-MM-dd}");
+        var key = new SourceKey("harness-request");
+        var reader = new TradeControlTaxSourceAdapter(_connections,
+            new SourceConnectionResolver([new(key, connectionString)]));
+        var source = await reader.ReadAsync(new BusinessIncomeSelector(key, new(taxSourceCode),
+            new(subjectCode), period), cancellationToken);
+        var items = _tagMapper.MapBusinessTaxItems(source.Facts, Tags);
 
         return new MicroHarnessPayload
         {
             PayloadVersion = "2026.1",
             TaxSourceCode = taxSourceCode,
-            PeriodStart = periodFrom.ToString("yyyy-MM-dd"),
-            PeriodEnd = periodTo.ToString("yyyy-MM-dd"),
+            PeriodStart = source.Period.Start.ToString("yyyy-MM-dd"),
+            PeriodEnd = source.Period.End.ToString("yyyy-MM-dd"),
             SubjectCode = subjectCode,
             Items = items,
             Meta = new Dictionary<string, object?>

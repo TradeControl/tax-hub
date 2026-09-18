@@ -6,7 +6,7 @@ namespace TradeControl.Tax.UK.Hmrc.Vat.v1_0.Returns;
 public class VatReturnRequest
 {
     [JsonIgnore]
-    public required string Vrn { get; set; }          // path
+    public string Vrn { get; set; } = string.Empty;   // path
     public required string PeriodKey { get; set; }
 
     public decimal VatDueSales { get; set; }
@@ -22,13 +22,5 @@ public class VatReturnRequest
 
     public bool Finalised { get; set; }
 
-    public string ToJson(bool indented = false)
-    {
-        var options = new JsonSerializerOptions
-        {
-            WriteIndented = indented
-        };
-
-        return JsonSerializer.Serialize(this, options);
-    }
+    public string ToJson(bool indented = false) => global::TradeControl.Tax.UK.Hmrc.Vat.VatJson.Serialize(this, indented);
 }

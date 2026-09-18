@@ -33,14 +33,14 @@ SELECT YearNumber,
        totalValueGoodsSuppliedExVAT,
        totalValueGoodsReceivedExVAT
 FROM Cash.vwTaxVatSubmission
-WHERE StartOn = @StartOn;
+WHERE CONVERT(date, VatEndOn) = @VatEndOn;
 """;
 
         using var connection = _connectionFactory.Create(connectionString);
         await SqlHelpers.EnsureOpenAsync(connection, cancellationToken);
 
         using var command = new SqlCommand(sql, connection);
-        command.Parameters.AddWithValue("@StartOn", periodEndOn);
+        command.Parameters.Add("@VatEndOn", System.Data.SqlDbType.Date).Value = periodEndOn.Date;
 
         using var reader = await command.ExecuteReaderAsync(cancellationToken);
         if (!await reader.ReadAsync(cancellationToken))

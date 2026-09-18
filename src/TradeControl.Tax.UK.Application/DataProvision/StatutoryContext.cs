@@ -1,5 +1,7 @@
 namespace TradeControl.Tax.UK.Application.DataProvision;
 
+using TradeControl.Tax.Data;
+
 public enum SuggestedValueOrigin
 {
     Source,
@@ -71,6 +73,14 @@ public sealed record StatutoryContextSnapshot(
 public interface IStatutoryContextSource
 {
     Task<StatutoryContextSnapshot> ReadAsync(
+        DateOnly asOfDate,
+        CancellationToken cancellationToken = default);
+}
+
+public interface ISourceStatutoryContextReader
+{
+    Task<StatutoryContextSnapshot> ReadAsync(
+        SourceKey source,
         DateOnly asOfDate,
         CancellationToken cancellationToken = default);
 }

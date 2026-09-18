@@ -1,19 +1,20 @@
 using TradeControl.Tax.UK.WebHarness.Requests.Payloads;
-using TradeControl.Tax.UK.Adapters.TradeControl.Data;
+using TradeControl.Tax.Data;
 
 namespace TradeControl.Tax.UK.WebHarness.Diagnostics.Mapping;
 
 public sealed class TagMapper
 {
     public IReadOnlyList<PayloadHarnessItem> MapBusinessTaxItems(
-        IEnumerable<TcBusinessTaxView> rows,
+        IEnumerable<BusinessIncomeFact> facts,
         IReadOnlyList<string> expectedTags)
     {
-        var valuesByTag = rows
-            .GroupBy(x => x.TagCode, StringComparer.OrdinalIgnoreCase)
+        var valuesByTag = facts
+            .Where(x => x.Amount.HasValue)
+            .GroupBy(x => x.Key.Value, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(
                 g => g.Key,
-                g => g.Sum(x => x.TaxableAmount),
+                g => g.Sum(x => x.Amount.Value),
                 StringComparer.OrdinalIgnoreCase);
 
         var items = new List<PayloadHarnessItem>(expectedTags.Count);

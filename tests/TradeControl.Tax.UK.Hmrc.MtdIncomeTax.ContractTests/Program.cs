@@ -1,4 +1,7 @@
 using System.Text.Json;
+using System.Text;
+using System.Security.Cryptography;
+using System.Reflection;
 using TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.Accounts.V4;
 using TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.BusinessAdjustments.V7;
 using TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.BusinessDetails.V2;
@@ -57,19 +60,7 @@ void AssertCompleteRoundTrip<T>(string fixtureName)
     Assert(missing.Count == 0, $"{fixtureName} contains unmodelled wire fields: {string.Join(", ", missing)}");
 }
 
-var endpoints = BusinessDetailsEndpoints.All
-    .Concat(ObligationEndpoints.All)
-    .Concat(CumulativeEndpoints.All)
-    .Concat(AnnualEndpoints.Production)
-    .Concat(BusinessAdjustmentEndpoints.All)
-    .Concat(BusinessIncomeSummaryEndpoints.All)
-    .Concat(LossV6Endpoints.All)
-    .Concat(LossV7Endpoints.All)
-    .Concat(TaxLiabilityAdjustmentEndpoints.All)
-    .Concat(CalculationEndpoints.All)
-    .Concat(FinalisationEndpoints.All)
-    .Concat(AccountEndpoints.All)
-    .ToList();
+var endpoints = SaOperationCatalog.Production;
 
 Assert(endpoints.Count >= 38, "The supported endpoint inventory is incomplete.");
 Assert(endpoints.All(x => x.Method is "GET" or "PUT" or "POST" or "DELETE"), "Every endpoint must constrain its HTTP method.");
@@ -82,6 +73,24 @@ Assert(CumulativeEndpoints.Get.Method == "GET" && CumulativeEndpoints.Get.Succes
 Assert(CumulativeEndpoints.Put.SuccessStatusCode == 204, "Cumulative PUT must return 204.");
 Assert(FinalisationEndpoints.FinalDeclaration.PathTemplate.EndsWith("/{calculationId}/final-declaration") && !FinalisationEndpoints.FinalDeclaration.HasRequestBody && FinalisationEndpoints.FinalDeclaration.SuccessStatusCode == 204, "Final declaration must be a bodyless 204 POST.");
 Assert(CalculationEndpoints.Trigger.SuccessStatusCode == 202 && !CalculationEndpoints.Trigger.HasRequestBody, "Calculation trigger must be a bodyless 202 POST.");
+Assert(endpoints.Count == 44 && SaOperationCatalog.All.Count == 45,
+    "An Income Tax endpoint was added or removed without updating the Phase 1 inventory baseline.");
+Assert(SaOperationCatalog.Coverage.Count == SaOperationCatalog.All.Count
+    && SaOperationCatalog.Coverage.Select(x => x.OperationId).Distinct(StringComparer.Ordinal).Count() == SaOperationCatalog.All.Count,
+    "Every Income Tax descriptor must have exactly one stable coverage entry.");
+Assert(SaOperationCatalog.Coverage.Count(x => x.AccountsMode == SaAccountsModeDecision.Supported) == 1
+    && SaOperationCatalog.Coverage.Single(x => x.AccountsMode == SaAccountsModeDecision.Supported).Descriptor == CumulativeEndpoints.Put,
+    "Only the approved cumulative PUT may be marked supported at the Phase 1 gate.");
+Assert(SaOperationCatalog.Coverage.Single(x => x.Descriptor == AnnualEndpoints.Put2026Preview).Descriptor.Preview,
+    "The annual future contract lost its explicit preview classification.");
+var reflectedEndpoints = typeof(HmrcEndpoint).Assembly.GetTypes()
+    .SelectMany(type => type.GetFields(BindingFlags.Public | BindingFlags.Static))
+    .Where(field => field.FieldType == typeof(HmrcEndpoint))
+    .Select(field => (HmrcEndpoint?)field.GetValue(null))
+    .Where(endpoint => endpoint is not null).Cast<HmrcEndpoint>().ToArray();
+Assert(reflectedEndpoints.Length == SaOperationCatalog.All.Count
+    && reflectedEndpoints.All(endpoint => SaOperationCatalog.All.Count(item => ReferenceEquals(item, endpoint)) == 1),
+    "An Income Tax endpoint descriptor was added, removed or left unclassified.");
 
 var detailed = new CumulativeSubmission
 {
@@ -108,6 +117,10 @@ var detailed = new CumulativeSubmission
     }
 };
 var detailedJson = JsonSerializer.Serialize(detailed, options);
+var detailedCanonical = SaJson.SerializeCanonical(detailed);
+var detailedCanonicalSha = Convert.ToHexString(SHA256.HashData(detailedCanonical));
+Assert(detailedCanonicalSha == "BEA68C00A2B393F10CB077FBA23B4CAE8F3334EB07C160755BD24D998B852B25",
+    "Canonical detailed cumulative request bytes changed.");
 using var detailedDoc = JsonDocument.Parse(detailedJson);
 var detailedRoot = detailedDoc.RootElement;
 Assert(detailedRoot.GetProperty("periodIncome").TryGetProperty("other", out _) && !detailedJson.Contains("otherBusinessIncome"), "Income must use HMRC property 'other'.");
@@ -139,6 +152,15 @@ var detailedRoundTrip = JsonSerializer.Deserialize<CumulativeSubmission>(File.Re
 var consolidatedRoundTrip = JsonSerializer.Deserialize<CumulativeSubmission>(File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "cumulative-consolidated.json")), options);
 Assert(detailedRoundTrip?.PeriodExpenses is DetailedPeriodExpenses, "A detailed cumulative GET response must deserialize to the detailed expense shape.");
 Assert(consolidatedRoundTrip?.PeriodExpenses is ConsolidatedPeriodExpenses, "A consolidated cumulative GET response must deserialize to the consolidated expense shape.");
+var consolidatedBytes = SaJson.SerializeCanonical(consolidated);
+Assert(Encoding.UTF8.GetString(consolidatedBytes) == "{\"periodIncome\":{\"turnover\":1,\"other\":0},\"periodExpenses\":{\"consolidatedExpenses\":-42.5}}",
+    "Canonical consolidated cumulative request bytes changed.");
+Assert(consolidatedBytes.SequenceEqual(SaJson.SerializeCanonical(consolidated))
+    && (consolidatedBytes.Length < 3 || !consolidatedBytes.AsSpan(0, 3).SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF })),
+    "SA canonical JSON is not deterministic BOM-free UTF-8.");
+var omittedCanonical = Encoding.UTF8.GetString(SaJson.SerializeCanonical(omitted));
+Assert(!omittedCanonical.Contains("turnover") && !omittedCanonical.Contains("periodDates"),
+    "Canonical serialization converted absent cumulative values into explicit defaults.");
 
 var annual = new AnnualSubmission2025
 {

@@ -1,0 +1,14 @@
+{
+  "subjectCode": "HOME",
+  "displayName": "Example Sole Trader",
+  "businessId": "XAIS12345678901",
+  "taxSourceCode": "UK-MTD-SELF",
+  "periodKey": "2026-Q1",
+  "start": "2026-04-06",
+  "end": "2026-07-05",
+  "snapshotToken": "BIZ-0001",
+  "facts": [
+    { "key": "TURNOVER", "label": "Turnover", "kind": "Income", "amount": 1200.50 },
+    { "key": "COST-OF-GOODS", "label": "Cost of goods", "kind": "Expense", "amount": 0 }
+  ]
+}

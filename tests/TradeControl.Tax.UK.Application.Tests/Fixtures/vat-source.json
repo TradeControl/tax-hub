@@ -1,0 +1,9 @@
+{
+  "subjectCode": "HOME",
+  "displayName": "Example Sole Trader",
+  "periodKey": "24A1",
+  "start": "2026-04-01",
+  "end": "2026-06-30",
+  "snapshotToken": "VAT-0001",
+  "values": [0, 125.25, 125.25, 25.25, 100.00, 1000, 500, 0, 0]
+}

@@ -98,6 +98,11 @@ public sealed class PreparedStatutoryArtifact
 
 public sealed record PreparedNameValue(string Name, string Value);
 
+public sealed record PreparedSourceEvidence(
+    string SourceSystem,
+    string DatasetKey,
+    string SnapshotToken);
+
 public sealed class PreparedApiRequest
 {
     private static readonly HashSet<string> CredentialHeaders = new(StringComparer.OrdinalIgnoreCase)
@@ -106,35 +111,68 @@ public sealed class PreparedApiRequest
         "Proxy-Authorization"
     };
 
-    public PreparedApiRequest(
-        PreparedStatutoryArtifact artifact,
+    internal PreparedApiRequest(
+        string operationId,
+        string contractFamily,
+        string contractVersion,
+        bool isPreview,
         string method,
         string relativePath,
-        IEnumerable<PreparedNameValue>? query = null,
-        IEnumerable<PreparedNameValue>? headers = null)
+        IEnumerable<PreparedNameValue> query,
+        IEnumerable<PreparedNameValue> headers,
+        string? contentType,
+        byte[]? bodyBytes,
+        IEnumerable<PreparedSourceEvidence> sourceEvidence,
+        IEnumerable<PreparedArtifactFinding> findings)
     {
-        ArgumentNullException.ThrowIfNull(artifact);
-        if (string.IsNullOrWhiteSpace(method))
-            throw new ArgumentException("The HTTP method cannot be empty.", nameof(method));
-        if (string.IsNullOrWhiteSpace(relativePath)
+        Require(operationId, nameof(operationId));
+        Require(contractFamily, nameof(contractFamily));
+        Require(contractVersion, nameof(contractVersion));
+        Require(method, nameof(method));
+        if (string.IsNullOrWhiteSpace(relativePath) || !relativePath.StartsWith('/')
+            || relativePath.Contains('{') || relativePath.Contains('}')
             || Uri.TryCreate(relativePath, UriKind.Absolute, out _))
-            throw new ArgumentException("A relative authority path is required.", nameof(relativePath));
+            throw new ArgumentException("A resolved relative authority path is required.", nameof(relativePath));
 
-        Artifact = artifact;
+        OperationId = operationId;
+        ContractFamily = contractFamily;
+        ContractVersion = contractVersion;
+        IsPreview = isPreview;
         Method = method.Trim().ToUpperInvariant();
         RelativePath = relativePath;
-        Query = query?.ToImmutableArray() ?? [];
-        Headers = headers?.ToImmutableArray() ?? [];
+        Query = query.ToImmutableArray();
+        Headers = headers.ToImmutableArray();
+        ContentType = contentType;
+        BodyBytes = bodyBytes is null ? null : ImmutableArray.Create(bodyBytes.ToArray());
+        BodySha256 = bodyBytes is null ? null : Convert.ToHexString(SHA256.HashData(bodyBytes));
+        SourceEvidence = sourceEvidence.ToImmutableArray();
+        Findings = findings.ToImmutableArray();
 
         if (Headers.Any(header => CredentialHeaders.Contains(header.Name)))
             throw new ArgumentException("Prepared requests cannot contain credentials.", nameof(headers));
     }
 
-    public PreparedStatutoryArtifact Artifact { get; }
+    public string OperationId { get; }
+    public string ContractFamily { get; }
+    public string ContractVersion { get; }
+    public bool IsPreview { get; }
     public string Method { get; }
     public string RelativePath { get; }
     public ImmutableArray<PreparedNameValue> Query { get; }
     public ImmutableArray<PreparedNameValue> Headers { get; }
+    public string? ContentType { get; }
+    public ImmutableArray<byte>? BodyBytes { get; }
+    public string? BodySha256 { get; }
+    public ImmutableArray<PreparedSourceEvidence> SourceEvidence { get; }
+    public ImmutableArray<PreparedArtifactFinding> Findings { get; }
+    public bool HasBody => BodyBytes.HasValue;
+    public bool HasErrors => Findings.Any(finding => finding.Severity == PreparedFindingSeverity.Error);
+
+    private static void Require(string value, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("A prepared request identifier cannot be empty.", parameterName);
+    }
 }
 
 public enum SubmissionPollingMode

@@ -29,6 +29,16 @@ public static class SaJson
         PropertyNamingPolicy = null,
         WriteIndented = true
     };
+
+    private static readonly JsonSerializerOptions CanonicalOptions = new()
+    {
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
+        PropertyNamingPolicy = null,
+        WriteIndented = false
+    };
+
+    public static byte[] SerializeCanonical<T>(T value) =>
+        JsonSerializer.SerializeToUtf8Bytes(value, CanonicalOptions);
 }
 
 public abstract class HmrcResponse

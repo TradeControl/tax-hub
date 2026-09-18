@@ -18,4 +18,9 @@ public sealed class CategoryMapper
         var clamped = ClampNonNegative(value);
         return decimal.Round(clamped, 2, MidpointRounding.AwayFromZero);
     }
+
+    public decimal ToMagnitudeAmount(decimal value)
+    {
+        return decimal.Round(Math.Abs(value), 2, MidpointRounding.AwayFromZero);
+    }
 }
