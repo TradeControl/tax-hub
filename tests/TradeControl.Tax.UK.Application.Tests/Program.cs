@@ -1,7 +1,9 @@
 using System.Reflection;
 using System.Text.Json;
 using TradeControl.Tax.Data;
+using TradeControl.Tax.UK.Application.DataProvision;
 using TradeControl.Tax.UK.Application.Preparation;
+using TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.Shared;
 
 var assertions = 0;
 void Assert(bool condition, string message)
@@ -67,6 +69,102 @@ Assert(business.Facts.Count == 2 && business.Facts[0].Key.Value == "TURNOVER"
     && business.Facts[0].DisplayLabel == "Turnover", "Business stable keys and labels were conflated.");
 Assert(business.Facts[0].Amount.Value == 1200.50m && business.Facts[1].Amount.State == TaxValueState.ExplicitZero,
     "Business-income money did not remain decimal or explicit zero.");
+
+var minSource = CumulativeFixture(true);
+var minSubmission = CumulativePeriodSummaryPreparer.Populate(minSource);
+Assert(minSubmission.PeriodIncome.Turnover == 1000m && minSubmission.PeriodIncome.Other == 0m
+    && minSubmission.PeriodExpenses is TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.SelfEmployment.V5.Cumulative.ConsolidatedPeriodExpenses
+        { ConsolidatedExpenses: 165m },
+    "The MIN cumulative profile did not preserve income, explicit zero and expense orientation.");
+var stdSource = CumulativeFixture(false);
+var stdSubmission = CumulativePeriodSummaryPreparer.Populate(stdSource);
+Assert(stdSubmission.PeriodExpenses is TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.SelfEmployment.V5.Cumulative.DetailedPeriodExpenses
+        { CostOfGoods: 100m, CarVanTravelExpenses: 20m, OtherExpenses: -2m, IrrecoverableDebts: 0m, Depreciation: 0m },
+    "The STD cumulative profile did not map its exact detailed members and orientations.");
+var roundedSource = stdSource with { Facts = stdSource.Facts.Select(fact => fact.Key.Value == "turnover"
+    ? fact with { Amount = TaxValue<decimal>.Present(1000.005m) } : fact).ToArray() };
+Assert(CumulativePeriodSummaryPreparer.Populate(roundedSource).PeriodIncome.Turnover == 1000.01m,
+    "Cumulative values were not rounded to two decimals away from zero.");
+try
+{
+    var invalidIncome = stdSource with { Facts = stdSource.Facts.Select(fact => fact.Key.Value == "turnover"
+        ? fact with { Amount = TaxValue<decimal>.Present(-0.01m) } : fact).ToArray() };
+    _ = CumulativePeriodSummaryPreparer.Populate(invalidIncome);
+    Assert(false, "Negative cumulative turnover was accepted.");
+}
+catch (InvalidOperationException) { Assert(true, "Income wire-range validation fails closed."); }
+var probeFacts = stdSource.Facts.Select(fact =>
+{
+    var mappingIndex = CumulativePopulationProfile.Mappings.ToList().FindIndex(mapping =>
+        mapping.StableKey.Equals(fact.Key.Value, StringComparison.OrdinalIgnoreCase));
+    var mapping = CumulativePopulationProfile.Mappings[mappingIndex];
+    return mapping.ExpenseShape == CumulativeExpenseShape.Consolidated ? fact : fact with
+    {
+        Amount = TaxValue<decimal>.Present(mappingIndex + 1m)
+    };
+}).ToArray();
+using (var probeJson = JsonDocument.Parse(SaJson.SerializeCanonical(
+    CumulativePeriodSummaryPreparer.Populate(stdSource with { Facts = probeFacts }))))
+foreach (var mapping in CumulativePopulationProfile.Mappings.Where(mapping =>
+    mapping.Section == CumulativeTargetSection.Income || mapping.ExpenseShape == CumulativeExpenseShape.Detailed))
+{
+    var section = mapping.Section == CumulativeTargetSection.Income ? "periodIncome" : "periodExpenses";
+    var expected = CumulativePopulationProfile.Mappings.ToList().FindIndex(candidate => candidate == mapping) + 1m;
+    Assert(probeJson.RootElement.GetProperty(section).GetProperty(mapping.TargetMember).GetDecimal() == expected,
+        $"Cumulative key '{mapping.StableKey}' did not populate '{section}.{mapping.TargetMember}'.");
+}
+try
+{
+    var both = minSource with { Facts = minSource.Facts.Select(fact =>
+        fact.Key.Value == "costOfGoods" ? fact with { Amount = TaxValue<decimal>.Present(-1m) } : fact).ToArray() };
+    _ = CumulativePeriodSummaryPreparer.Populate(both);
+    Assert(false, "Consolidated and detailed cumulative expenses were accepted together.");
+}
+catch (InvalidOperationException) { Assert(true, "Mixed cumulative expense shapes fail closed."); }
+try
+{
+    var unknown = minSource with { Facts = minSource.Facts.Append(new(new("unknownExpense"), "Unknown",
+        TaxFactKind.Expense, TaxValue<decimal>.Present(-1m), Provenance("business-income", "unknownExpense"))).ToArray() };
+    _ = CumulativePeriodSummaryPreparer.Populate(unknown);
+    Assert(false, "An unknown cumulative fact key was accepted.");
+}
+catch (InvalidOperationException) { Assert(true, "Unknown cumulative fact keys fail closed."); }
+var cumulativePreparer = new CumulativePeriodSummaryPreparer(new BusinessReader(minSource),
+    new Readiness(new([])), new SourceContext(StatutoryFixture()),
+    new FilingContext(new("QQ123456C", new("XQIS00000000001"), "CASH", "STANDARD", [])),
+    new PreparedApiRequestPipeline());
+var cumulativePrepared = await cumulativePreparer.PrepareAsync(new(new("sole-trader-standard"),
+    new("UK-ITSA-SE-CUM"), minSource.Period, "2026-27"));
+Assert(!cumulativePrepared.HasErrors && cumulativePrepared.BodyBytes is { } cumulativeBytes
+    && cumulativePrepared.RelativePath == "/individuals/business/self-employment/QQ123456C/XQIS00000000001/cumulative/2026-27"
+    && cumulativePrepared.BodySha256 == Convert.ToHexString(
+        System.Security.Cryptography.SHA256.HashData(cumulativeBytes.AsSpan())),
+    "The cumulative use case did not produce an exact immutable prepared request.");
+var invalidTaxYear = await cumulativePreparer.PrepareAsync(new(new("sole-trader-standard"),
+    new("UK-ITSA-SE-CUM"), minSource.Period, "2025-26"));
+Assert(invalidTaxYear.HasErrors && !invalidTaxYear.HasBody
+    && invalidTaxYear.Findings.Any(item => item.Code == "ITSA-PERIOD-OUTSIDE-TAX-YEAR"),
+    "An invalid cumulative tax-year/period combination produced sendable bytes.");
+var invalidStandardPeriod = await cumulativePreparer.PrepareAsync(new(new("sole-trader-standard"),
+    new("UK-ITSA-SE-CUM"), new(new(2026, 4, 6), new(2026, 7, 4), TaxPeriodKind.Cumulative, "26-Q1"), "2026-27"));
+Assert(invalidStandardPeriod.HasErrors && !invalidStandardPeriod.HasBody
+    && invalidStandardPeriod.Findings.Any(item => item.Code == "ITSA-STANDARD-PERIOD-INVALID"),
+    "A non-boundary standard cumulative period produced sendable bytes.");
+var invalidFilingPreparer = new CumulativePeriodSummaryPreparer(new BusinessReader(minSource),
+    new Readiness(new([])), new SourceContext(StatutoryFixture()),
+    new FilingContext(new("QQ123456C", new("invalid-business"), "OTHER", "CALENDAR", [])),
+    new PreparedApiRequestPipeline());
+var invalidFiling = await invalidFilingPreparer.PrepareAsync(new(new("sole-trader-standard"),
+    new("UK-ITSA-SE-CUM"), minSource.Period, "2026-27"));
+Assert(invalidFiling.HasErrors && !invalidFiling.HasBody
+    && new[] { "ITSA-BUSINESS-ID-INVALID", "ITSA-ACCOUNTING-BASIS-INVALID", "ITSA-CALENDAR-OBLIGATION-REQUIRED" }
+        .All(code => invalidFiling.Findings.Any(item => item.Code == code)),
+    "Invalid filing identifiers, basis or unverified calendar dates produced sendable bytes.");
+var unsupportedTaxYear = await cumulativePreparer.PrepareAsync(new(new("sole-trader-standard"),
+    new("UK-ITSA-SE-CUM"), new(new(2024, 4, 6), new(2024, 7, 5), TaxPeriodKind.Cumulative, "24-Q1"), "2024-25"));
+Assert(unsupportedTaxYear.HasErrors && !unsupportedTaxYear.HasBody
+    && unsupportedTaxYear.Findings.Any(item => item.Code == "ITSA-TAX-YEAR-UNSUPPORTED"),
+    "A pre-cumulative API tax year produced sendable bytes.");
 
 var vatReader = new VatReader(vat);
 var vatSelector = new VatReturnSelector(new("company-standard"), vat.Period);
@@ -146,6 +244,46 @@ static BusinessIncomeSource ReadBusinessFixture()
         Dataset(root, "business-income", facts.Select(x => x.Provenance).ToArray()));
 }
 
+static BusinessIncomeSource CumulativeFixture(bool consolidated)
+{
+    var period = new TaxReportingPeriod(new(2026, 4, 6), new(2026, 7, 5), TaxPeriodKind.Cumulative, "26-Q1");
+    var subject = new TaxSubject("HOME", "Example Sole Trader", TaxSubjectKind.Person,
+        TaxLegalForm.SoleTrader, "UK", "GBP");
+    var facts = CumulativePopulationProfile.Mappings.Select(mapping =>
+    {
+        var active = mapping.Section == CumulativeTargetSection.Income
+            || mapping.ExpenseShape == (consolidated ? CumulativeExpenseShape.Consolidated : CumulativeExpenseShape.Detailed);
+        if (!consolidated && mapping.StableKey is "irrecoverableDebts" or "depreciation") active = false;
+        var amount = mapping.StableKey switch
+        {
+            "turnover" => 1000m,
+            "otherBusinessIncome" => 0m,
+            "consolidatedExpenses" => 165m,
+            "costOfGoods" => 100m,
+            "carVanTravelExpenses" => 20m,
+            "otherExpenses" => -2m,
+            _ => 0m
+        };
+        var value = !active ? TaxValue<decimal>.Unsupported("Alternate cumulative profile.")
+            : amount == 0m ? TaxValue<decimal>.ExplicitZero(0m) : TaxValue<decimal>.Present(amount);
+        return new BusinessIncomeFact(new(mapping.StableKey), mapping.TargetMember,
+            mapping.Section == CumulativeTargetSection.Income ? TaxFactKind.Income : TaxFactKind.Expense,
+            value, Provenance("business-income", mapping.StableKey));
+    }).ToArray();
+    return new(subject, new("XQIS00000000001"), new("UK-ITSA-SE-CUM"), period, facts,
+        new("fixture", "business-income", CumulativePopulationProfile.Version,
+            new DateTimeOffset(2026, 9, 19, 12, 0, 0, TimeSpan.Zero),
+            consolidated ? "MIN-0001" : "STD-0001", facts.Select(item => item.Provenance).ToArray()));
+}
+
+static StatutoryContextSnapshot StatutoryFixture()
+{
+    var version = new SourceVersion("fixture", "01", null);
+    return new(new("HOME", "Example Sole Trader", 4, "UK", "UK", "GBP", null, null,
+            "Trade", 1, "Trading", null, "Trading", [version]), [], [], [],
+        new(new(2026, 4, 6), new(2027, 4, 5)));
+}
+
 static TaxSubject Subject(JsonElement root) => new(root.GetProperty("subjectCode").GetString()!,
     root.GetProperty("displayName").GetString()!, TaxSubjectKind.Person, TaxLegalForm.SoleTrader, "GB", "GBP");
 static TaxReportingPeriod Period(JsonElement root, TaxPeriodKind kind) => new(
@@ -184,5 +322,25 @@ sealed class Readiness(SourceReadiness readiness) : ISourceReadinessEvaluator
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(readiness);
+    }
+}
+
+sealed class SourceContext(StatutoryContextSnapshot context) : ISourceStatutoryContextReader
+{
+    public Task<StatutoryContextSnapshot> ReadAsync(SourceKey source, DateOnly asOfDate,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(context);
+    }
+}
+
+sealed class FilingContext(SelfEmploymentFilingContext context) : ISelfEmploymentFilingContextReader
+{
+    public Task<SelfEmploymentFilingContext> ReadAsync(SelfEmploymentFilingContextSelector selector,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return Task.FromResult(context);
     }
 }

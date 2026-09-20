@@ -21,7 +21,7 @@ public sealed class VatPreparationStore
         var id = Guid.NewGuid().ToString("N");
         _requests[id] = request;
         Directory.CreateDirectory(_outputDirectory);
-        var metadata = VatPreparationInspection.From(id, request);
+        var metadata = PreparedApiRequestInspection.From(id, request);
         await File.WriteAllBytesAsync(Path.Combine(_outputDirectory, $"{id}.json"),
             JsonSerializer.SerializeToUtf8Bytes(metadata, new JsonSerializerOptions { WriteIndented = true }), cancellationToken);
         if (request.BodyBytes is { } bytes)
@@ -32,7 +32,7 @@ public sealed class VatPreparationStore
     public bool TryGet(string id, out PreparedApiRequest request) => _requests.TryGetValue(id, out request!);
 }
 
-public sealed record VatPreparationInspection(
+public sealed record PreparedApiRequestInspection(
     string PreparationId,
     string OperationId,
     string ContractFamily,
@@ -49,7 +49,7 @@ public sealed record VatPreparationInspection(
     IReadOnlyList<PreparedSourceEvidence> SourceEvidence,
     IReadOnlyList<PreparedArtifactFinding> Findings)
 {
-    public static VatPreparationInspection From(string id, PreparedApiRequest request) => new(
+    public static PreparedApiRequestInspection From(string id, PreparedApiRequest request) => new(
         id, request.OperationId, request.ContractFamily, request.ContractVersion, true, request.IsPreview,
         request.Method, request.RelativePath, request.Query, request.Headers, request.ContentType,
         request.BodyBytes?.Length, request.BodySha256, request.SourceEvidence, request.Findings);

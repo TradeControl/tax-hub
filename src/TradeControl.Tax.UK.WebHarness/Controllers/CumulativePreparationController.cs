@@ -6,24 +6,23 @@ using TradeControl.Tax.UK.WebHarness.Diagnostics.Preparation;
 
 namespace TradeControl.Tax.UK.WebHarness.Controllers;
 
-public sealed record PrepareVatReturnRequest(
+public sealed record PrepareCumulativeSummaryRequest(
     string ConnectionString,
+    string TaxSourceCode,
     DateOnly PeriodStart,
     DateOnly PeriodEnd,
-    string PeriodKey,
-    bool Finalised = true,
-    string? VatRegistrationOverride = null);
+    string TaxYear);
 
 [ApiController]
-[Route("harness/hmrc/vat/returns")]
-public sealed class VatPreparationController : ControllerBase
+[Route("harness/hmrc/mtd-income-tax/cumulative")]
+public sealed class CumulativePreparationController : ControllerBase
 {
     private readonly ConnectionFactory _connections;
     private readonly PreparedApiRequestPipeline _pipeline;
-    private readonly VatPreparationStore _store;
+    private readonly CumulativePreparationStore _store;
 
-    public VatPreparationController(ConnectionFactory connections, PreparedApiRequestPipeline pipeline,
-        VatPreparationStore store)
+    public CumulativePreparationController(ConnectionFactory connections,
+        PreparedApiRequestPipeline pipeline, CumulativePreparationStore store)
     {
         _connections = connections;
         _pipeline = pipeline;
@@ -31,24 +30,29 @@ public sealed class VatPreparationController : ControllerBase
     }
 
     [HttpPost("prepare")]
-    public async Task<IActionResult> Prepare([FromBody] PrepareVatReturnRequest request,
+    public async Task<IActionResult> Prepare([FromBody] PrepareCumulativeSummaryRequest request,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.ConnectionString))
             return BadRequest(new { error = "connectionString is required." });
+        TaxSourceCode taxSource;
         TaxReportingPeriod period;
-        try { period = new(request.PeriodStart, request.PeriodEnd, TaxPeriodKind.Vat,
-            $"VAT-{request.PeriodEnd:yyyy-MM-dd}"); }
+        try
+        {
+            taxSource = new(request.TaxSourceCode);
+            period = new(request.PeriodStart, request.PeriodEnd, TaxPeriodKind.Cumulative,
+                $"{request.TaxYear}:{request.PeriodEnd:yyyy-MM-dd}");
+        }
         catch (ArgumentException exception) { return BadRequest(new { error = exception.Message }); }
 
         var sourceKey = new SourceKey("harness-request");
         var resolver = new SourceConnectionResolver([new(sourceKey, request.ConnectionString)]);
         var source = new TradeControlTaxSourceAdapter(_connections, resolver);
-        var context = new TradeControlStatutoryContextAdapter(_connections, resolver);
-        var preparer = new VatReturnPreparer(source, source, context, _pipeline);
+        var statutory = new TradeControlStatutoryContextAdapter(_connections, resolver);
+        var filing = new TradeControlSelfEmploymentFilingContextAdapter(_connections, resolver);
+        var preparer = new CumulativePeriodSummaryPreparer(source, source, statutory, filing, _pipeline);
         var prepared = await preparer.PrepareAsync(
-            new(sourceKey, period, request.PeriodKey, request.Finalised,
-                request.VatRegistrationOverride), cancellationToken);
+            new(sourceKey, taxSource, period, request.TaxYear), cancellationToken);
         var id = await _store.SaveAsync(prepared, cancellationToken);
         var inspection = PreparedApiRequestInspection.From(id, prepared);
         return prepared.HasErrors ? UnprocessableEntity(inspection) : Ok(inspection);

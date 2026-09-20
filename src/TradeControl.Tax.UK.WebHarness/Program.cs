@@ -23,6 +23,7 @@ builder.Services.AddSwaggerGen(c =>
 builder.Services.AddSingleton<ConnectionFactory>();
 builder.Services.AddSingleton<PreparedApiRequestPipeline>();
 builder.Services.AddSingleton<VatPreparationStore>();
+builder.Services.AddSingleton<CumulativePreparationStore>();
 builder.Services.AddSingleton<SubmissionLogger>();
 builder.Services.AddSingleton<TagMapper>();
 builder.Services.AddSingleton<CategoryMapper>();
