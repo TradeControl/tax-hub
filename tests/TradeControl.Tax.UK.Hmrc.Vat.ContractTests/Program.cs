@@ -49,6 +49,11 @@ var submit = VatOperationCatalog.All.Single(x => x.OperationId == "vat.returns.s
 Assert(submit.Shape == VatRequestShape.AccountingBody && submit.ContentType == "application/json"
     && submit.HasContractFixture && submit.HasPopulationFixture && submit.HasHarnessCoverage,
     "VAT return coverage metadata is incomplete.");
+var described = VatOperationCatalog.All.Where(x => x.Shape == VatRequestShape.BodylessEnquiry
+    && x.AccountsMode == VatAccountsModeDecision.Supported).ToArray();
+Assert(described.Select(x => x.OperationId).SequenceEqual(["vat.obligations.list", "vat.returns.retrieve"])
+    && described.All(x => x.HasContractFixture && !x.HasPopulationFixture && x.HasHarnessCoverage),
+    "Only the approved VAT obligations and view-return descriptions may advertise Phase 8 coverage.");
 
 var bytes = VatJson.SerializeCanonical(request);
 var bytesAgain = VatJson.SerializeCanonical(request);

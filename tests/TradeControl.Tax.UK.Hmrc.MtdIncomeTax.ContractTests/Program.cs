@@ -78,9 +78,31 @@ Assert(endpoints.Count == 44 && SaOperationCatalog.All.Count == 45,
 Assert(SaOperationCatalog.Coverage.Count == SaOperationCatalog.All.Count
     && SaOperationCatalog.Coverage.Select(x => x.OperationId).Distinct(StringComparer.Ordinal).Count() == SaOperationCatalog.All.Count,
     "Every Income Tax descriptor must have exactly one stable coverage entry.");
-Assert(SaOperationCatalog.Coverage.Count(x => x.AccountsMode == SaAccountsModeDecision.Supported) == 1
-    && SaOperationCatalog.Coverage.Single(x => x.AccountsMode == SaAccountsModeDecision.Supported).Descriptor == CumulativeEndpoints.Put,
-    "Only the approved cumulative PUT may be marked supported at the Phase 1 gate.");
+var bodyCoverage = SaOperationCatalog.Coverage.Where(x => x.Descriptor.HasRequestBody).ToArray();
+Assert(bodyCoverage.Count(x => x.AccountsMode == SaAccountsModeDecision.Supported) == 1
+    && bodyCoverage.Single(x => x.AccountsMode == SaAccountsModeDecision.Supported).Descriptor == CumulativeEndpoints.Put,
+    "Only the approved cumulative PUT may be marked supported at the Phase 7 body-operation gate.");
+Assert(bodyCoverage.Length == 14,
+    "A body-bearing Income Tax operation was added or removed without updating the Phase 7 policy baseline.");
+Assert(bodyCoverage.All(x => !string.IsNullOrWhiteSpace(x.DecisionReason)
+    && !string.IsNullOrWhiteSpace(x.RequiredSource)
+    && !string.IsNullOrWhiteSpace(x.PlannedUseCase)),
+    "Every body-bearing operation must record an explicit decision, reason, source and use-case disposition.");
+Assert(bodyCoverage.Count(x => x.AccountsMode == SaAccountsModeDecision.Supported) == 1
+    && bodyCoverage.Count(x => x.AccountsMode == SaAccountsModeDecision.Deferred) == 12
+    && bodyCoverage.Count(x => x.AccountsMode == SaAccountsModeDecision.Unsupported) == 1,
+    "The Phase 7 body-operation dispositions changed without an explicit policy update.");
+Assert(bodyCoverage.Single(x => x.AccountsMode == SaAccountsModeDecision.Unsupported).Descriptor == AnnualEndpoints.Put2026Preview,
+    "Only the preview-only 2026-27 annual write is unsupported; reviewed production operations remain deferred.");
+Assert(bodyCoverage.Where(x => x.AccountsMode != SaAccountsModeDecision.Supported)
+    .All(x => !x.HasPopulationFixture && !x.HasHarnessCoverage),
+    "A deferred or unsupported body operation must not advertise population or harness coverage.");
+var describedObligations = SaOperationCatalog.Coverage.Single(x => x.Descriptor == ObligationEndpoints.IncomeAndExpenditure);
+Assert(describedObligations.AccountsMode == SaAccountsModeDecision.Supported
+    && describedObligations.HasContractFixture && !describedObligations.HasPopulationFixture
+    && describedObligations.HasHarnessCoverage
+    && describedObligations.WebHarnessRoute == "/harness/hmrc/mtd-income-tax/obligations/describe",
+    "The approved Income Tax obligations description coverage is incomplete.");
 Assert(SaOperationCatalog.Coverage.Single(x => x.Descriptor == AnnualEndpoints.Put2026Preview).Descriptor.Preview,
     "The annual future contract lost its explicit preview classification.");
 var reflectedEndpoints = typeof(HmrcEndpoint).Assembly.GetTypes()

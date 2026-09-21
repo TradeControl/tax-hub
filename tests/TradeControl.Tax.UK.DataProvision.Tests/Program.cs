@@ -53,6 +53,9 @@ Assert(snapshot.BusinessTaxWindow.End == snapshot.BusinessTaxWindow.Start.AddYea
 
 if (args.Contains("--corporation-tax-profit", StringComparer.OrdinalIgnoreCase))
 {
+    Assert(snapshot.Identity.BusinessTaxTypeCode == 0,
+        $"The Corporation Tax profit scenario requires a company sandbox (BusinessTaxTypeCode 0); " +
+        $"'{snapshot.Identity.SubjectName}' reports code {snapshot.Identity.BusinessTaxTypeCode}.");
     const decimal expectedTax = 10775.81867m;
     var period = snapshot.BusinessTaxWindow;
     var taxProjection = await new TcBusinessTaxReader(factory).ReadCorporationTaxAsync(

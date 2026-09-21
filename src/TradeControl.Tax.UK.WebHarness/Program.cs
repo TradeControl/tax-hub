@@ -14,6 +14,7 @@ using TradeControl.Tax.UK.Application.Preparation;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddControllers();
+builder.Services.AddProblemDetails();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(c =>
 {
@@ -22,8 +23,11 @@ builder.Services.AddSwaggerGen(c =>
 
 builder.Services.AddSingleton<ConnectionFactory>();
 builder.Services.AddSingleton<PreparedApiRequestPipeline>();
-builder.Services.AddSingleton<VatPreparationStore>();
-builder.Services.AddSingleton<CumulativePreparationStore>();
+builder.Services.AddSingleton<BodylessRequestDescriber>();
+builder.Services.AddSingleton(sp => new PreparedApiRequestStore(
+    PreparedApiRequestStoreOptions.Development(
+        sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath,
+        sp.GetRequiredService<IConfiguration>())));
 builder.Services.AddSingleton<SubmissionLogger>();
 builder.Services.AddSingleton<TagMapper>();
 builder.Services.AddSingleton<CategoryMapper>();
@@ -45,6 +49,14 @@ builder.Services.AddSingleton<CorporationTaxRunner>();
 
 var app = builder.Build();
 
+app.UseExceptionHandler(errorApp => errorApp.Run(async context =>
+{
+    var feature = context.Features.Get<Microsoft.AspNetCore.Diagnostics.IExceptionHandlerFeature>();
+    var problem = PreparedRequestProblem.FromException(
+        feature?.Error ?? new InvalidOperationException(), context.TraceIdentifier);
+    context.Response.StatusCode = problem.Status ?? StatusCodes.Status500InternalServerError;
+    await context.Response.WriteAsJsonAsync(problem);
+}));
 app.UseRouting();
 
 if (app.Environment.IsDevelopment())

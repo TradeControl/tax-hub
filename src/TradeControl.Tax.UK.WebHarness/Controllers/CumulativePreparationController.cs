@@ -19,10 +19,10 @@ public sealed class CumulativePreparationController : ControllerBase
 {
     private readonly ConnectionFactory _connections;
     private readonly PreparedApiRequestPipeline _pipeline;
-    private readonly CumulativePreparationStore _store;
+    private readonly PreparedApiRequestStore _store;
 
     public CumulativePreparationController(ConnectionFactory connections,
-        PreparedApiRequestPipeline pipeline, CumulativePreparationStore store)
+        PreparedApiRequestPipeline pipeline, PreparedApiRequestStore store)
     {
         _connections = connections;
         _pipeline = pipeline;
@@ -63,12 +63,12 @@ public sealed class CumulativePreparationController : ControllerBase
         ? Ok(PreparedApiRequestInspection.From(preparationId, request)) : NotFound();
 
     [HttpGet("{preparationId}/body")]
-    public IActionResult Body(string preparationId)
+    public async Task<IActionResult> Body(string preparationId, CancellationToken cancellationToken)
     {
         if (!_store.TryGet(preparationId, out var request)) return NotFound();
         if (request.BodyBytes is not { } body) return UnprocessableEntity(
             PreparedApiRequestInspection.From(preparationId, request));
-        Response.Headers["X-TaxHub-Preview"] = "true";
-        return File(body.ToArray(), request.ContentType ?? "application/octet-stream");
+        await PreparedApiRequestHttp.WriteBodyAsync(Response, request, cancellationToken);
+        return new EmptyResult();
     }
 }

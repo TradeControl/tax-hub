@@ -31,18 +31,19 @@ public static class VatOperationCatalog
         Enquiry("vat.customer-information.retrieve", VatCustomerInformationEndpoint.Method, VatCustomerInformationEndpoint.Path, VatCustomerInformationEndpoint.Scope, Vrn, [], typeof(VatCustomerInformationRequest), typeof(VatCustomerInformationResponse), "statutory VAT registration", "RetrieveVatCustomerInformation"),
         Enquiry("vat.financial-details.retrieve", VatFinancialDetailsEndpoint.Method, VatFinancialDetailsEndpoint.Path, VatFinancialDetailsEndpoint.Scope, ["vrn", "penaltyChargeReference"], [], typeof(VatFinancialDetailsRequest), typeof(VatFinancialDetailsResponse), "VAT registration and penalty reference", "RetrieveVatFinancialDetails"),
         Enquiry("vat.liabilities.list", VatLiabilitiesEndpoint.Method, VatLiabilitiesEndpoint.Path, VatLiabilitiesEndpoint.Scope, Vrn, ["from", "to"], typeof(VatLiabilitiesRequest), typeof(VatLiabilitiesResponse), "VAT registration and liability period", "RetrieveVatLiabilities"),
-        Enquiry("vat.obligations.list", VatObligationsEndpoint.Method, VatObligationsEndpoint.Path, VatObligationsEndpoint.Scope, Vrn, ["from", "to", "status"], typeof(VatObligationsRequest), typeof(VatObligationsResponse), "VAT registration and obligation period", "RetrieveVatObligations"),
+        Enquiry("vat.obligations.list", VatObligationsEndpoint.Method, VatObligationsEndpoint.Path, VatObligationsEndpoint.Scope, Vrn, ["from", "to", "status"], typeof(VatObligationsRequest), typeof(VatObligationsResponse), "VAT registration and obligation period", "DescribeVatObligations", true, "/harness/hmrc/vat/obligations/describe"),
         Enquiry("vat.payments.list", VatPaymentsEndpoint.Method, VatPaymentsEndpoint.Path, VatPaymentsEndpoint.Scope, Vrn, ["from", "to"], typeof(VatPaymentsRequest), typeof(VatPaymentsResponse), "VAT registration and payment period", "RetrieveVatPayments"),
         Enquiry("vat.penalties.list", VatPenaltiesEndpoint.Method, VatPenaltiesEndpoint.Path, VatPenaltiesEndpoint.Scope, Vrn, [], typeof(VatPenaltiesRequest), typeof(VatPenaltiesResponse), "VAT registration", "RetrieveVatPenalties"),
         new("vat.returns.submit", VatReturnEndpoint.Method, VatReturnEndpoint.Path, VatReturnEndpoint.Version, VatReturnEndpoint.Scope, Vrn, [], VatRequestShape.AccountingBody, typeof(VatReturnRequest), typeof(VatReturnResponse), Accept, "application/json", VatAccountsModeDecision.Supported, "nine-box VAT accounting projection", "PrepareVatReturn", "/api/vat/returns", true, true, true),
-        Enquiry("vat.returns.retrieve", VatViewReturnEndpoint.Method, VatViewReturnEndpoint.Path, VatViewReturnEndpoint.Scope, ["vrn", "periodKey"], [], typeof(VatViewReturnRequest), typeof(VatViewReturnResponse), "VAT registration and period key", "RetrieveVatReturn")
+        Enquiry("vat.returns.retrieve", VatViewReturnEndpoint.Method, VatViewReturnEndpoint.Path, VatViewReturnEndpoint.Scope, ["vrn", "periodKey"], [], typeof(VatViewReturnRequest), typeof(VatViewReturnResponse), "VAT registration and period key", "DescribeVatReturn", true, "/harness/hmrc/vat/returns/view/describe")
     ];
 
     private static VatOperationDescriptor Enquiry(string id, string method, string path, string scope,
         IReadOnlyList<string> pathParameters, IReadOnlyList<string> queryParameters, Type request, Type response,
-        string source, string useCase) => new(id, method, path, "1.0", scope, pathParameters, queryParameters,
-            VatRequestShape.BodylessEnquiry, request, response, Accept, null, VatAccountsModeDecision.Supported,
-            source, useCase, $"/api/vat/{id[4..].Replace('.', '-')}", true, false, false);
+        string source, string useCase, bool approved = false, string? route = null) => new(id, method, path, "1.0", scope,
+            pathParameters, queryParameters, VatRequestShape.BodylessEnquiry, request, response, Accept, null,
+            approved ? VatAccountsModeDecision.Supported : VatAccountsModeDecision.Deferred,
+            source, useCase, route ?? $"/api/vat/{id[4..].Replace('.', '-')}", true, false, approved);
 }
 
 public static class VatJson

@@ -12,6 +12,15 @@ void Assert(bool condition, string message)
     if (!condition) throw new InvalidOperationException(message);
 }
 
+void AssertRejected(Action action, string message)
+{
+    assertions++;
+    try { action(); }
+    catch (ArgumentException) { return; }
+    catch (InvalidOperationException) { return; }
+    throw new InvalidOperationException(message);
+}
+
 var zero = TaxValue<decimal>.ExplicitZero(0m);
 var absent = TaxValue<decimal>.Absent("No source fact.");
 var unsupported = TaxValue<decimal>.Unsupported("Not supported by this profile.");
@@ -135,11 +144,39 @@ var cumulativePreparer = new CumulativePeriodSummaryPreparer(new BusinessReader(
     new PreparedApiRequestPipeline());
 var cumulativePrepared = await cumulativePreparer.PrepareAsync(new(new("sole-trader-standard"),
     new("UK-ITSA-SE-CUM"), minSource.Period, "2026-27"));
-Assert(!cumulativePrepared.HasErrors && cumulativePrepared.BodyBytes is { } cumulativeBytes
+Assert(!cumulativePrepared.HasErrors && cumulativePrepared.BodyBytes.HasValue
     && cumulativePrepared.RelativePath == "/individuals/business/self-employment/QQ123456C/XQIS00000000001/cumulative/2026-27"
     && cumulativePrepared.BodySha256 == Convert.ToHexString(
-        System.Security.Cryptography.SHA256.HashData(cumulativeBytes.AsSpan())),
+        System.Security.Cryptography.SHA256.HashData(cumulativePrepared.BodyBytes!.Value.AsSpan())),
     "The cumulative use case did not produce an exact immutable prepared request.");
+var cumulativeBytes = cumulativePrepared.BodyBytes!.Value;
+var standardPreparer = new CumulativePeriodSummaryPreparer(new BusinessReader(stdSource),
+    new Readiness(new([])), new SourceContext(StatutoryFixture()),
+    new FilingContext(new("QQ123456C", new("XQIS00000000001"), "CASH", "STANDARD", [])),
+    new PreparedApiRequestPipeline());
+var standardPrepared = await standardPreparer.PrepareAsync(new(new("sole-trader-standard"),
+    new("UK-ITSA-SE-CUM"), stdSource.Period, "2026-27"));
+Assert(!standardPrepared.HasErrors && standardPrepared.HasBody
+    && !standardPrepared.BodyBytes!.Value.AsSpan().SequenceEqual(cumulativeBytes.AsSpan()),
+    "The detailed cumulative profile did not produce its distinct prepared body.");
+var vatPrepared = await new VatReturnPreparer(new VatReader(vat), new Readiness(new([])),
+    new SourceContext(StatutoryFixture()), new PreparedApiRequestPipeline()).PrepareAsync(
+        new(new("company-standard"), vat.Period, "26A1", true, "123456789"));
+Assert(!vatPrepared.HasErrors && vatPrepared.HasBody
+    && vatPrepared.RelativePath == "/organisations/vat/123456789/returns",
+    "The VAT fixture did not pass through the complete offline preparation pipeline.");
+var gateway = new CapturingGateway();
+foreach (var prepared in new[] { vatPrepared, cumulativePrepared, standardPrepared })
+{
+    await gateway.SendAsync(prepared);
+    Assert(ReferenceEquals(gateway.Received, prepared)
+        && gateway.Received!.BodyBytes!.Value.AsSpan().SequenceEqual(prepared.BodyBytes!.Value.AsSpan()),
+        "The Objective 4 handoff changed the prepared request instance or exact body bytes.");
+}
+Assert(vatPrepared.BodySha256 == "5B8376A5A0D38E781DB04880F212A82580726FF5789EA556C1F0C75564CB07C9"
+    && cumulativePrepared.BodySha256 == "B451B9B75627D430B39231D8B2A2074F63DC26A988B60CC33C8866E92EAC4494"
+    && standardPrepared.BodySha256 == "2823706A60A5AB43E48B3A00410752DF730A910DFB0521F4E5FA8282BCFBD302",
+    "An approved VAT, MIN or STD offline prepared-body snapshot changed.");
 var invalidTaxYear = await cumulativePreparer.PrepareAsync(new(new("sole-trader-standard"),
     new("UK-ITSA-SE-CUM"), minSource.Period, "2025-26"));
 Assert(invalidTaxYear.HasErrors && !invalidTaxYear.HasBody
@@ -204,6 +241,41 @@ using (var cancellation = new CancellationTokenSource())
     }
     catch (OperationCanceledException) { Assert(true, "Cancellation propagated through the source port."); }
 }
+
+var describer = new BodylessRequestDescriber(new PreparedApiRequestPipeline());
+var vatObligations = describer.Describe(new DescribeVatObligations(
+    "123 456 789", new(2026, 4, 1), new(2026, 6, 30), "o"));
+Assert(vatObligations.OperationId == "vat.obligations.list"
+    && vatObligations.RelativePath == "/organisations/vat/123456789/obligations"
+    && vatObligations.Query.Select(item => $"{item.Name}={item.Value}")
+        .SequenceEqual(["from=2026-04-01", "to=2026-06-30", "status=O"])
+    && vatObligations.Headers.Single().Value == "application/vnd.hmrc.1.0+json"
+    && !vatObligations.HasBody && vatObligations.ContentType is null,
+    "The VAT obligations description lost its path, ordered query, headers or bodyless semantics.");
+var vatView = describer.Describe(new DescribeVatReturn("123456789", "26A1"));
+Assert(vatView.RelativePath == "/organisations/vat/123456789/returns/26A1"
+    && vatView.Query.Length == 0 && !vatView.HasBody,
+    "The VAT view-return description is incorrect.");
+var incomeObligations = describer.Describe(new DescribeIncomeTaxObligations(
+    "qq 12 34 56 c", "SELF-EMPLOYMENT", "XQIS00000000001",
+    new(2026, 4, 6), new(2027, 4, 5), "open"));
+Assert(incomeObligations.RelativePath == "/obligations/details/QQ123456C/income-and-expenditure"
+    && incomeObligations.Query.Select(item => item.Name)
+        .SequenceEqual(["typeOfBusiness", "businessId", "fromDate", "toDate", "status"])
+    && incomeObligations.Query.Last().Value == "Open"
+    && incomeObligations.Headers.Single().Value == "application/vnd.hmrc.3.0+json"
+    && !incomeObligations.HasBody && incomeObligations.BodySha256 is null,
+    "The Income Tax obligations description lost its typed identifiers, ordered query or bodyless semantics.");
+AssertRejected(() => describer.Describe(new DescribeVatObligations("123456789", new(2026, 4, 1))),
+    "An unpaired VAT date filter was accepted.");
+AssertRejected(() => describer.Describe(new DescribeVatReturn("12345678", "26A1")),
+    "An invalid VAT registration was accepted.");
+AssertRejected(() => describer.Describe(new DescribeIncomeTaxObligations(
+        "QQ123456C", BusinessId: "XQIS00000000001")),
+    "An Income Tax business identifier without its business type was accepted.");
+AssertRejected(() => describer.Describe(new DescribeIncomeTaxObligations(
+        "QQ123456C", Status: "Unknown")),
+    "An invalid Income Tax obligation status was accepted.");
 
 Console.WriteLine($"Application source vocabulary tests passed ({assertions} assertions)." );
 
@@ -342,5 +414,16 @@ sealed class FilingContext(SelfEmploymentFilingContext context) : ISelfEmploymen
     {
         cancellationToken.ThrowIfCancellationRequested();
         return Task.FromResult(context);
+    }
+}
+
+sealed class CapturingGateway : IPreparedApiRequestGateway
+{
+    public PreparedApiRequest? Received { get; private set; }
+    public Task SendAsync(PreparedApiRequest request, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        Received = request;
+        return Task.CompletedTask;
     }
 }
