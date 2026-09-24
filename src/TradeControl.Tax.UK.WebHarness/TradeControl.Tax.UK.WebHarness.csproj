@@ -19,4 +19,8 @@
     <ProjectReference Include="..\TradeControl.Tax.UK.Adapters.Submission\TradeControl.Tax.UK.Adapters.Submission.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="TradeControl.Tax.UK.WebHarness.Tests" />
+  </ItemGroup>
+
 </Project>

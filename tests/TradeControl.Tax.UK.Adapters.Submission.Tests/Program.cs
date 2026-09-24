@@ -172,6 +172,7 @@ try
             && !property.Name.Contains("Environment", StringComparison.OrdinalIgnoreCase)),
         "Prepared content can activate an authority environment.");
     assertions += await OAuthTests.RunAsync(root, provider);
+    assertions += await FraudPreventionTests.RunAsync(root);
 }
 finally
 {

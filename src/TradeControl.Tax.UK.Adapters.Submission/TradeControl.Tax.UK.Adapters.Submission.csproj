@@ -8,4 +8,7 @@
   <ItemGroup>
     <ProjectReference Include="..\TradeControl.Tax.UK.Application\TradeControl.Tax.UK.Application.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="TradeControl.Tax.UK.WebHarness.Tests" />
+  </ItemGroup>
 </Project>

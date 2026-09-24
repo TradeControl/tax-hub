@@ -1,4 +1,4 @@
-@TaxHub.WebHarness_HostAddress = http://localhost:5151
+@TaxHub.WebHarness_HostAddress = http://localhost:44362
 
 POST {{TaxHub.WebHarness_HostAddress}}/api/company/accounts
 Content-Type: application/json
@@ -144,3 +144,8 @@ Content-Type: application/json
   "taxSourceCode": "VAT",
   "environment": "sandbox"
 }
+
+###
+# Run the hmrc-sandbox launch profile and open Swagger first; Swagger captures the browser facts automatically.
+GET https://localhost:44362/diagnostics/hmrc/fraud-prevention/validate
+Accept: application/json

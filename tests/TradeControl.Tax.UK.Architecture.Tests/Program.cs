@@ -66,6 +66,18 @@ Assert(!SourceContains(Path.Combine(submissionDirectory, "Audit"), "HttpClient",
     "OAuth transport escaped the dedicated submission OAuth boundary.");
 Assert(!SourceContains(Path.Combine(submissionDirectory, "OAuth"), "/organisations/vat/", "VatJson.Serialize", "Fraud-Prevention"),
     "Phase 5.2 introduced a VAT resource call, VAT body or fraud-header behaviour.");
+var fraudPrevention = Path.Combine(submissionDirectory, "FraudPrevention");
+Assert(!SourceContains(fraudPrevention, "Microsoft.AspNetCore", "X-Forwarded-For", "VatJson.Serialize",
+        "SaJson.SerializeCanonical", "/organisations/vat/", "Authorization: Bearer"),
+    "The fraud-prevention boundary trusts HTTP headers directly or contains submission/body concerns.");
+var diagnosticFactoryConsumers = Directory.GetFiles(source, "*.cs", SearchOption.AllDirectories)
+    .Where(path => !path.StartsWith(fraudPrevention, StringComparison.OrdinalIgnoreCase))
+    .Where(path => File.ReadAllText(path).Contains("CreateFileBackedSandboxValidatorDiagnostic",
+        StringComparison.Ordinal))
+    .ToArray();
+Assert(diagnosticFactoryConsumers.Length == 1
+    && diagnosticFactoryConsumers[0].Contains("TradeControl.Tax.UK.WebHarness", StringComparison.Ordinal),
+    "The relaxed sandbox-validator formatter escaped the development WebHarness diagnostic.");
 
 Console.WriteLine($"Tax Hub architecture tests passed ({assertions} assertions).");
 
