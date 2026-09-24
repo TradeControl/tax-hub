@@ -99,12 +99,21 @@ Assert(bodyCoverage.Where(x => x.AccountsMode != SaAccountsModeDecision.Supporte
     "A deferred or unsupported body operation must not advertise population or harness coverage.");
 var describedObligations = SaOperationCatalog.Coverage.Single(x => x.Descriptor == ObligationEndpoints.IncomeAndExpenditure);
 Assert(describedObligations.AccountsMode == SaAccountsModeDecision.Supported
+    && describedObligations.Descriptor.OAuthScope == "read:self-assessment"
+    && describedObligations.Descriptor.SuccessStatusCode == 200
+    && describedObligations.Descriptor.ResponseType == typeof(IncomeAndExpenditureObligationsResponse)
     && describedObligations.HasContractFixture && !describedObligations.HasPopulationFixture
     && describedObligations.HasHarnessCoverage
     && describedObligations.WebHarnessRoute == "/harness/hmrc/mtd-income-tax/obligations/describe",
     "The approved Income Tax obligations description coverage is incomplete.");
 Assert(SaOperationCatalog.Coverage.Single(x => x.Descriptor == AnnualEndpoints.Put2026Preview).Descriptor.Preview,
     "The annual future contract lost its explicit preview classification.");
+var supportedCumulative = SaOperationCatalog.Coverage.Single(x => x.Descriptor == CumulativeEndpoints.Put);
+Assert(supportedCumulative.AccountsMode == SaAccountsModeDecision.Supported
+    && supportedCumulative.Descriptor.OAuthScope == "write:self-assessment"
+    && supportedCumulative.Descriptor.SuccessStatusCode == 204
+    && supportedCumulative.Descriptor.ResponseType is null,
+    "The supported cumulative PUT lost its exact scope, empty-success or status metadata.");
 var reflectedEndpoints = typeof(HmrcEndpoint).Assembly.GetTypes()
     .SelectMany(type => type.GetFields(BindingFlags.Public | BindingFlags.Static))
     .Where(field => field.FieldType == typeof(HmrcEndpoint))

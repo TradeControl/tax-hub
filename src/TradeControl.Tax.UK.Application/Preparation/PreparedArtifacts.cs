@@ -116,12 +116,17 @@ public sealed class PreparedApiRequest
         string contractFamily,
         string contractVersion,
         bool isPreview,
+        PreparedApiEligibility eligibility,
         string method,
         string relativePath,
         IEnumerable<PreparedNameValue> query,
         IEnumerable<PreparedNameValue> headers,
         string? contentType,
         byte[]? bodyBytes,
+        string requiredOAuthScope,
+        int expectedSuccessStatusCode,
+        PreparedApiResponseBodyExpectation responseBodyExpectation,
+        Type? expectedResponseType,
         IEnumerable<PreparedSourceEvidence> sourceEvidence,
         IEnumerable<PreparedArtifactFinding> findings)
     {
@@ -138,6 +143,7 @@ public sealed class PreparedApiRequest
         ContractFamily = contractFamily;
         ContractVersion = contractVersion;
         IsPreview = isPreview;
+        Eligibility = eligibility;
         Method = method.Trim().ToUpperInvariant();
         RelativePath = relativePath;
         Query = query.ToImmutableArray();
@@ -145,6 +151,10 @@ public sealed class PreparedApiRequest
         ContentType = contentType;
         BodyBytes = bodyBytes is null ? null : ImmutableArray.Create(bodyBytes.ToArray());
         BodySha256 = bodyBytes is null ? null : Convert.ToHexString(SHA256.HashData(bodyBytes));
+        RequiredOAuthScope = requiredOAuthScope;
+        ExpectedSuccessStatusCode = expectedSuccessStatusCode;
+        ResponseBodyExpectation = responseBodyExpectation;
+        ExpectedResponseType = expectedResponseType;
         SourceEvidence = sourceEvidence.ToImmutableArray();
         Findings = findings.ToImmutableArray();
 
@@ -156,6 +166,7 @@ public sealed class PreparedApiRequest
     public string ContractFamily { get; }
     public string ContractVersion { get; }
     public bool IsPreview { get; }
+    public PreparedApiEligibility Eligibility { get; }
     public string Method { get; }
     public string RelativePath { get; }
     public ImmutableArray<PreparedNameValue> Query { get; }
@@ -163,6 +174,10 @@ public sealed class PreparedApiRequest
     public string? ContentType { get; }
     public ImmutableArray<byte>? BodyBytes { get; }
     public string? BodySha256 { get; }
+    public string RequiredOAuthScope { get; }
+    public int ExpectedSuccessStatusCode { get; }
+    public PreparedApiResponseBodyExpectation ResponseBodyExpectation { get; }
+    public Type? ExpectedResponseType { get; }
     public ImmutableArray<PreparedSourceEvidence> SourceEvidence { get; }
     public ImmutableArray<PreparedArtifactFinding> Findings { get; }
     public bool HasBody => BodyBytes.HasValue;
@@ -226,7 +241,72 @@ public sealed class PreparedSubmissionPackage
 
 public interface IPreparedApiRequestGateway
 {
-    Task SendAsync(PreparedApiRequest request, CancellationToken cancellationToken = default);
+    Task<PreparedApiOutcome> SendAsync(PreparedApiRequest request, AuthorityDispatchContext context,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class AuthorityDispatchContext
+{
+    public AuthorityDispatchContext(string tenantReference, string authorisationPrincipalReference,
+        string actorReference, string approvalReference, string sealedClientFactsReference)
+    {
+        TenantReference = RequiredReference(tenantReference, nameof(tenantReference));
+        AuthorisationPrincipalReference = RequiredReference(authorisationPrincipalReference, nameof(authorisationPrincipalReference));
+        ActorReference = RequiredReference(actorReference, nameof(actorReference));
+        ApprovalReference = RequiredReference(approvalReference, nameof(approvalReference));
+        SealedClientFactsReference = RequiredReference(sealedClientFactsReference, nameof(sealedClientFactsReference));
+    }
+
+    public string TenantReference { get; }
+    public string AuthorisationPrincipalReference { get; }
+    public string ActorReference { get; }
+    public string ApprovalReference { get; }
+    public string SealedClientFactsReference { get; }
+
+    private static string RequiredReference(string value, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("A dispatch context reference cannot be empty.", parameterName);
+        return value.Trim();
+    }
+}
+
+public enum PreparedApiOutcomeKind
+{
+    Succeeded,
+    Rejected,
+    Failed,
+    Unknown
+}
+
+public sealed record PreparedApiOutcome(
+    PreparedApiOutcomeKind Kind,
+    string OutcomeCode,
+    int? ActualStatusCode = null,
+    string? AttemptReference = null,
+    string? SafeResponseReference = null);
+
+public abstract class PreparedApiRequestGateway : IPreparedApiRequestGateway
+{
+    public Task<PreparedApiOutcome> SendAsync(PreparedApiRequest request, AuthorityDispatchContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (request.Eligibility != PreparedApiEligibility.Supported)
+            throw new InvalidOperationException($"Operation '{request.OperationId}' is not supported for dispatch.");
+        if (request.IsPreview)
+            throw new InvalidOperationException($"Preview operation '{request.OperationId}' cannot be dispatched.");
+        if (request.HasErrors)
+            throw new InvalidOperationException($"Operation '{request.OperationId}' has blocking preparation findings.");
+
+        return SendEligibleAsync(request, context, cancellationToken);
+    }
+
+    protected abstract Task<PreparedApiOutcome> SendEligibleAsync(PreparedApiRequest request,
+        AuthorityDispatchContext context, CancellationToken cancellationToken);
 }
 
 public interface IPreparedSubmissionPackageGateway

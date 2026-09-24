@@ -166,10 +166,12 @@ Assert(!vatPrepared.HasErrors && vatPrepared.HasBody
     && vatPrepared.RelativePath == "/organisations/vat/123456789/returns",
     "The VAT fixture did not pass through the complete offline preparation pipeline.");
 var gateway = new CapturingGateway();
+var dispatchContext = new AuthorityDispatchContext("tenant-01", "principal-01", "actor-01", "approval-01", "facts-01");
 foreach (var prepared in new[] { vatPrepared, cumulativePrepared, standardPrepared })
 {
-    await gateway.SendAsync(prepared);
+    var outcome = await gateway.SendAsync(prepared, dispatchContext);
     Assert(ReferenceEquals(gateway.Received, prepared)
+        && outcome.Kind == PreparedApiOutcomeKind.Succeeded
         && gateway.Received!.BodyBytes!.Value.AsSpan().SequenceEqual(prepared.BodyBytes!.Value.AsSpan()),
         "The Objective 4 handoff changed the prepared request instance or exact body bytes.");
 }
@@ -177,6 +179,13 @@ Assert(vatPrepared.BodySha256 == "5B8376A5A0D38E781DB04880F212A82580726FF5789EA5
     && cumulativePrepared.BodySha256 == "B451B9B75627D430B39231D8B2A2074F63DC26A988B60CC33C8866E92EAC4494"
     && standardPrepared.BodySha256 == "2823706A60A5AB43E48B3A00410752DF730A910DFB0521F4E5FA8282BCFBD302",
     "An approved VAT, MIN or STD offline prepared-body snapshot changed.");
+Assert(vatPrepared.RequiredOAuthScope == "write:vat" && vatPrepared.ExpectedSuccessStatusCode == 201
+    && vatPrepared.ResponseBodyExpectation == PreparedApiResponseBodyExpectation.Json
+    && cumulativePrepared.RequiredOAuthScope == "write:self-assessment"
+    && cumulativePrepared.ExpectedSuccessStatusCode == 204
+    && cumulativePrepared.ResponseBodyExpectation == PreparedApiResponseBodyExpectation.None
+    && cumulativePrepared.ExpectedResponseType is null,
+    "Prepared VAT or Income Tax transport metadata is incomplete.");
 var invalidTaxYear = await cumulativePreparer.PrepareAsync(new(new("sole-trader-standard"),
     new("UK-ITSA-SE-CUM"), minSource.Period, "2025-26"));
 Assert(invalidTaxYear.HasErrors && !invalidTaxYear.HasBody
@@ -256,6 +265,9 @@ var vatView = describer.Describe(new DescribeVatReturn("123456789", "26A1"));
 Assert(vatView.RelativePath == "/organisations/vat/123456789/returns/26A1"
     && vatView.Query.Length == 0 && !vatView.HasBody,
     "The VAT view-return description is incorrect.");
+var specialVatView = describer.Describe(new DescribeVatReturn("123456789", "#001"));
+Assert(specialVatView.RelativePath == "/organisations/vat/123456789/returns/%23001",
+    "The supported special VAT period key was not escaped in the resolved path.");
 var incomeObligations = describer.Describe(new DescribeIncomeTaxObligations(
     "qq 12 34 56 c", "SELF-EMPLOYMENT", "XQIS00000000001",
     new(2026, 4, 6), new(2027, 4, 5), "open"));
@@ -417,13 +429,14 @@ sealed class FilingContext(SelfEmploymentFilingContext context) : ISelfEmploymen
     }
 }
 
-sealed class CapturingGateway : IPreparedApiRequestGateway
+sealed class CapturingGateway : PreparedApiRequestGateway
 {
     public PreparedApiRequest? Received { get; private set; }
-    public Task SendAsync(PreparedApiRequest request, CancellationToken cancellationToken = default)
+    protected override Task<PreparedApiOutcome> SendEligibleAsync(PreparedApiRequest request,
+        AuthorityDispatchContext context, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
         Received = request;
-        return Task.CompletedTask;
+        return Task.FromResult(new PreparedApiOutcome(PreparedApiOutcomeKind.Succeeded, "FAKE-SUCCESS"));
     }
 }

@@ -47,11 +47,14 @@ Assert(reflectedVatEndpoints.Length == VatOperationCatalog.All.Count
     "A VAT endpoint was added, removed or left unclassified.");
 var submit = VatOperationCatalog.All.Single(x => x.OperationId == "vat.returns.submit");
 Assert(submit.Shape == VatRequestShape.AccountingBody && submit.ContentType == "application/json"
+    && submit.OAuthScope == "write:vat" && submit.SuccessStatusCode == 201
+    && submit.ResponseType == typeof(VatReturnResponse)
     && submit.HasContractFixture && submit.HasPopulationFixture && submit.HasHarnessCoverage,
     "VAT return coverage metadata is incomplete.");
 var described = VatOperationCatalog.All.Where(x => x.Shape == VatRequestShape.BodylessEnquiry
     && x.AccountsMode == VatAccountsModeDecision.Supported).ToArray();
 Assert(described.Select(x => x.OperationId).SequenceEqual(["vat.obligations.list", "vat.returns.retrieve"])
+    && described.All(x => x.OAuthScope == "read:vat" && x.SuccessStatusCode == 200 && x.ResponseType is not null)
     && described.All(x => x.HasContractFixture && !x.HasPopulationFixture && x.HasHarnessCoverage),
     "Only the approved VAT obligations and view-return descriptions may advertise Phase 8 coverage.");
 

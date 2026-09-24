@@ -23,5 +23,6 @@
     <Project Path="../tests/TradeControl.Tax.UK.Company.ContractTests/TradeControl.Tax.UK.Company.ContractTests.csproj" />
     <Project Path="../tests/TradeControl.Tax.UK.WebHarness.Tests/TradeControl.Tax.UK.WebHarness.Tests.csproj" />
     <Project Path="../tests/TradeControl.Tax.UK.Architecture.Tests/TradeControl.Tax.UK.Architecture.Tests.csproj" />
+    <Project Path="../tests/TradeControl.Tax.UK.Adapters.Submission.Tests/TradeControl.Tax.UK.Adapters.Submission.Tests.csproj" />
   </Folder>
 </Solution>

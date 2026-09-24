@@ -27,7 +27,8 @@ Assert(!SourceContains(Path.GetDirectoryName(application)!,
     "Application contains a prohibited SQL or ASP.NET Core dependency.");
 
 var preparation = Path.Combine(Path.GetDirectoryName(application)!, "Preparation");
-Assert(!SourceContains(preparation, "HttpClient", "OAuth", "Adapters.Submission", "Microsoft.AspNetCore"),
+Assert(!SourceContains(preparation, "HttpClient", "Bearer ", "AccessToken", "ClientSecret",
+        "Adapters.Submission", "Microsoft.AspNetCore"),
     "Objective 3 preparation code contains a transport, authentication or submission-adapter concern.");
 
 var controllers = Path.Combine(source, "TradeControl.Tax.UK.WebHarness", "Controllers");
@@ -54,6 +55,17 @@ var objectiveThreeControllers = new[]
 Assert(objectiveThreeControllers.All(name => !File.ReadAllText(Path.Combine(controllers, name))
         .Contains("HmrcSubmissionRunner", StringComparison.Ordinal)),
     "An Objective 3 controller can invoke the retained legacy submission runner.");
+
+var submission = projects.Single(path => Path.GetFileName(path) == "TradeControl.Tax.UK.Adapters.Submission.csproj");
+Assert(ProjectReferences(submission).Count == 1
+    && ProjectReferences(submission).Single().Contains(".Application", StringComparison.Ordinal),
+    "The submission adapter must depend only on the Application boundary.");
+var submissionDirectory = Path.GetDirectoryName(submission)!;
+Assert(!SourceContains(Path.Combine(submissionDirectory, "Audit"), "HttpClient", "AuthorizationCode", "HttpRequestMessage")
+    && !SourceContains(Path.Combine(submissionDirectory, "Configuration"), "HttpClient", "AuthorizationCode", "HttpRequestMessage"),
+    "OAuth transport escaped the dedicated submission OAuth boundary.");
+Assert(!SourceContains(Path.Combine(submissionDirectory, "OAuth"), "/organisations/vat/", "VatJson.Serialize", "Fraud-Prevention"),
+    "Phase 5.2 introduced a VAT resource call, VAT body or fraud-header behaviour.");
 
 Console.WriteLine($"Tax Hub architecture tests passed ({assertions} assertions).");
 

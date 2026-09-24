@@ -5,18 +5,36 @@ namespace TradeControl.Tax.UK.Application.Preparation;
 
 public sealed record PreparedParameterContract(string Name, bool Required = true);
 
+public enum PreparedApiEligibility
+{
+    Supported,
+    Deferred,
+    Unsupported
+}
+
+public enum PreparedApiResponseBodyExpectation
+{
+    None,
+    Json
+}
+
 public sealed record PreparedApiContract(
     string OperationId,
     string ContractFamily,
     string ContractVersion,
     bool IsPreview,
+    PreparedApiEligibility Eligibility,
     string Method,
     string PathTemplate,
     IReadOnlyList<PreparedParameterContract> PathParameters,
     IReadOnlyList<PreparedParameterContract> QueryParameters,
     string Accept,
     string? ContentType,
-    bool HasBody);
+    bool HasBody,
+    string RequiredOAuthScope,
+    int ExpectedSuccessStatusCode,
+    PreparedApiResponseBodyExpectation ResponseBodyExpectation,
+    Type? ExpectedResponseType);
 
 public sealed record PreparedValidationStage(
     string Name,
@@ -35,6 +53,7 @@ public sealed class PreparedApiRequestPipeline
         IEnumerable<PreparedValidationStage>? validationStages = null)
     {
         ArgumentNullException.ThrowIfNull(contract);
+        ValidateTransportMetadata(contract);
         var findings = RunStages(validationStages);
         var path = ResolvePath(contract, pathValues);
         var query = ResolveQuery(contract.QueryParameters, queryValues ?? []);
@@ -54,8 +73,24 @@ public sealed class PreparedApiRequestPipeline
         if (contract.ContentType is not null) headers.Add(new("Content-Type", contract.ContentType));
 
         return new(contract.OperationId, contract.ContractFamily, contract.ContractVersion, contract.IsPreview,
-            contract.Method, path, query, headers, contract.ContentType, bytes,
+            contract.Eligibility, contract.Method, path, query, headers, contract.ContentType, bytes,
+            contract.RequiredOAuthScope, contract.ExpectedSuccessStatusCode,
+            contract.ResponseBodyExpectation, contract.ExpectedResponseType,
             sourceEvidence ?? [], findings);
+    }
+
+    private static void ValidateTransportMetadata(PreparedApiContract contract)
+    {
+        if (string.IsNullOrWhiteSpace(contract.RequiredOAuthScope))
+            throw new ArgumentException("A prepared API contract requires an OAuth scope.", nameof(contract));
+        if (contract.ExpectedSuccessStatusCode is < 200 or > 299)
+            throw new ArgumentException("A prepared API contract requires an exact successful HTTP status.", nameof(contract));
+        if (contract.ResponseBodyExpectation == PreparedApiResponseBodyExpectation.None
+            && contract.ExpectedResponseType is not null)
+            throw new ArgumentException("A bodyless success cannot declare a response DTO.", nameof(contract));
+        if (contract.ResponseBodyExpectation == PreparedApiResponseBodyExpectation.Json
+            && contract.ExpectedResponseType is null)
+            throw new ArgumentException("A JSON success requires a response DTO.", nameof(contract));
     }
 
     private static ImmutableArray<PreparedArtifactFinding> RunStages(IEnumerable<PreparedValidationStage>? stages)

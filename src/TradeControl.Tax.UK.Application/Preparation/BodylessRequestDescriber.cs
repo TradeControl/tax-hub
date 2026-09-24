@@ -24,7 +24,7 @@ public sealed record DescribeIncomeTaxObligations(
 public sealed class BodylessRequestDescriber(PreparedApiRequestPipeline pipeline)
 {
     private static readonly Regex Vrn = new("^[0-9]{9}$", RegexOptions.Compiled);
-    private static readonly Regex PeriodKey = new("^[A-Za-z0-9]{4}$", RegexOptions.Compiled);
+    private static readonly Regex PeriodKey = new("^(?:[A-Za-z0-9]{4}|#[0-9]{3})$", RegexOptions.Compiled);
     private static readonly Regex Nino = new("^[A-Z]{2}[0-9]{6}[A-D]$", RegexOptions.Compiled);
     private static readonly Regex BusinessId = new("^X[A-Z0-9]{1}IS[0-9]{11}$", RegexOptions.Compiled);
 
@@ -49,7 +49,7 @@ public sealed class BodylessRequestDescriber(PreparedApiRequestPipeline pipeline
         var vrn = NormalizeVrn(request.Vrn);
         var periodKey = (request.PeriodKey ?? string.Empty).Trim();
         if (!PeriodKey.IsMatch(periodKey))
-            throw new ArgumentException("VAT periodKey must contain exactly four letters or digits.", nameof(request));
+            throw new ArgumentException("VAT periodKey must be four letters/digits or a hash followed by three digits.", nameof(request));
         var descriptor = VatOperationCatalog.All.Single(item => item.OperationId == "vat.returns.retrieve");
         return pipeline.Prepare(HmrcPreparedApiContracts.From(descriptor),
             [new("vrn", vrn), new("periodKey", periodKey)]);
