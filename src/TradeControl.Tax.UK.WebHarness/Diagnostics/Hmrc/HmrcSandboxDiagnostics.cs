@@ -78,12 +78,18 @@ public sealed class HmrcSandboxDiagnostics : IHmrcSandboxDiagnostics, IDisposabl
         var fraudKey = RandomNumberGenerator.GetBytes(32);
         try
         {
-            var secrets = new JsonFileSecretProvider(settingsPath,
-                HmrcSecretReferences.LegacyVatSandboxJsonProperties);
+            ISecretProvider secrets = string.IsNullOrWhiteSpace(
+                    Environment.GetEnvironmentVariable("TaxHub__HmrcSandbox__ClientId"))
+                ? new JsonFileSecretProvider(settingsPath, HmrcSecretReferences.LegacyVatSandboxJsonProperties)
+                : new EnvironmentSecretProvider(HmrcSecretReferences.AppServiceEnvironmentVariables);
             var environment = EnvironmentSelector.Sandbox();
             var tokenEndpoint = new HmrcOAuthTokenEndpoint(environment);
+            var redirectUri = configuration["TaxHub:HmrcSandbox:RedirectUri"] is { Length: > 0 } configuredRedirect
+                ? new Uri(configuredRedirect, UriKind.Absolute)
+                : HmrcOAuthOptions.LocalSandbox.RedirectUri;
+            var oauthOptions = HmrcOAuthOptions.LocalSandbox with { RedirectUri = redirectUri };
             var oauth = HmrcOAuthService.CreateFileBackedSandbox(Path.Combine(runtimeRoot, "oauth-grants.enc"),
-                oauthKey, secrets, tokenEndpoint);
+                oauthKey, secrets, tokenEndpoint, options: oauthOptions);
             var licenseIds = configuration.GetSection("TaxHub:HmrcSandbox:LicenseIds").GetChildren()
                 .ToDictionary(item => item.Key, item => item.Value ?? string.Empty, StringComparer.Ordinal);
             return new(Path.Combine(runtimeRoot, "fraud-contexts"), fraudKey, oauth, tokenEndpoint,

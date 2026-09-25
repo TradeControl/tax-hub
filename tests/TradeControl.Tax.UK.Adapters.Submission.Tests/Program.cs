@@ -26,7 +26,9 @@ var sandbox = EnvironmentSelector.Sandbox();
 Assert(sandbox.Selected == HmrcEnvironmentProfiles.Sandbox
     && sandbox.Selected.LiveRequestsEnabled
     && sandbox.ResolveApiPath("/organisations/vat/123456789/obligations").AbsoluteUri
-        == "https://test-api.service.hmrc.gov.uk/organisations/vat/123456789/obligations",
+        == "https://test-api.service.hmrc.gov.uk/organisations/vat/123456789/obligations"
+    && sandbox.ResolveApiPath("/oauth/token").AbsoluteUri
+        == "https://test-api.service.hmrc.gov.uk/oauth/token",
     "The closed HMRC sandbox profile is incorrect.");
 Assert(HmrcEnvironmentProfiles.Production.ApiBaseUri.AbsoluteUri == "https://api.service.hmrc.gov.uk/"
     && !HmrcEnvironmentProfiles.Production.LiveRequestsEnabled,

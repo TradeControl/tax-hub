@@ -44,7 +44,7 @@ public static class HmrcEnvironmentProfiles
         ArgumentNullException.ThrowIfNull(profile);
         if (string.IsNullOrWhiteSpace(relativePath)
             || !relativePath.StartsWith('/')
-            || Uri.TryCreate(relativePath, UriKind.Absolute, out _))
+            || relativePath.StartsWith("//", StringComparison.Ordinal))
             throw new ArgumentException("Only an authority-relative path can be resolved.", nameof(relativePath));
         var resolved = new Uri(profile.ApiBaseUri, relativePath);
         if (!IsAllowedHost(resolved) || resolved.Host != profile.ApiBaseUri.Host)

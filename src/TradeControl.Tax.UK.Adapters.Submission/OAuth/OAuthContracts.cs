@@ -28,7 +28,12 @@ public sealed record HmrcOAuthOptions(
 
     public void Validate()
     {
-        if (RedirectUri != LocalSandbox.RedirectUri)
+        var approvedAppServiceCallback = RedirectUri.Scheme == Uri.UriSchemeHttps
+            && RedirectUri.AbsolutePath.Equals("/VatMTD", StringComparison.Ordinal)
+            && string.IsNullOrEmpty(RedirectUri.Query)
+            && string.IsNullOrEmpty(RedirectUri.Fragment)
+            && RedirectUri.Host.EndsWith(".azurewebsites.net", StringComparison.OrdinalIgnoreCase);
+        if (RedirectUri != LocalSandbox.RedirectUri && !approvedAppServiceCallback)
             throw new InvalidOperationException("The OAuth callback is not the approved sandbox host entry point.");
         if (PendingAuthorisationLifetime <= TimeSpan.Zero || PendingAuthorisationLifetime > TimeSpan.FromMinutes(10))
             throw new InvalidOperationException("The pending authorisation lifetime is invalid.");

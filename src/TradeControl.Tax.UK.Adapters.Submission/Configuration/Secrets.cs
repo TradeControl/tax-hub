@@ -53,6 +53,32 @@ public interface ISecretProvider
         CancellationToken cancellationToken = default);
 }
 
+public sealed class EnvironmentSecretProvider : ISecretProvider
+{
+    private readonly IReadOnlyDictionary<string, string> _approvedVariables;
+
+    public EnvironmentSecretProvider(IReadOnlyDictionary<SecretReference, string> approvedVariables)
+    {
+        ArgumentNullException.ThrowIfNull(approvedVariables);
+        if (approvedVariables.Count == 0 || approvedVariables.Any(item => string.IsNullOrWhiteSpace(item.Value)))
+            throw new ArgumentException("At least one approved environment secret is required.", nameof(approvedVariables));
+        _approvedVariables = approvedVariables.ToDictionary(item => item.Key.Value, item => item.Value,
+            StringComparer.Ordinal);
+    }
+
+    public ValueTask<ProtectedSecret> ResolveAsync(SecretReference reference,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        if (!_approvedVariables.TryGetValue(reference.Value, out var variableName))
+            throw new KeyNotFoundException("The requested secret reference is not approved by this provider.");
+        var value = Environment.GetEnvironmentVariable(variableName);
+        if (string.IsNullOrEmpty(value))
+            throw new InvalidOperationException("The approved secret is absent from the protected environment.");
+        return ValueTask.FromResult(new ProtectedSecret(value));
+    }
+}
+
 public sealed class JsonFileSecretProvider : ISecretProvider
 {
     private readonly string _settingsPath;
@@ -99,5 +125,12 @@ public static class HmrcSecretReferences
         {
             [ClientId] = "clientId",
             [ClientSecret] = "clientSecret"
+        };
+
+    public static IReadOnlyDictionary<SecretReference, string> AppServiceEnvironmentVariables { get; } =
+        new Dictionary<SecretReference, string>
+        {
+            [ClientId] = "TaxHub__HmrcSandbox__ClientId",
+            [ClientSecret] = "TaxHub__HmrcSandbox__ClientSecret"
         };
 }

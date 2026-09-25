@@ -132,17 +132,20 @@ public static class PreparedRequestProblem
 {
     public static ProblemDetails FromException(Exception exception, string correlationId)
     {
-        var (status, title) = exception switch
+        var (status, title, detail) = exception switch
         {
-            ArgumentException => (StatusCodes.Status400BadRequest, "The request is invalid."),
-            InvalidOperationException => (StatusCodes.Status422UnprocessableEntity, "The request could not be prepared."),
-            _ => (StatusCodes.Status500InternalServerError, "The request failed unexpectedly.")
+            ArgumentException => (StatusCodes.Status400BadRequest, "The request is invalid.",
+                "A request value failed validation."),
+            InvalidOperationException => (StatusCodes.Status422UnprocessableEntity,
+                "The request could not be completed.", "The request is not valid in the current state."),
+            _ => (StatusCodes.Status500InternalServerError, "The request failed unexpectedly.",
+                "The request failed before a response could be produced.")
         };
         return new()
         {
             Status = status,
             Title = title,
-            Detail = "No prepared request was created.",
+            Detail = detail,
             Extensions = { ["correlationId"] = correlationId }
         };
     }

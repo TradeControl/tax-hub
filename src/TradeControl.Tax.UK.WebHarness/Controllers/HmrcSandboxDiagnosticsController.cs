@@ -114,8 +114,21 @@ public sealed class HmrcSandboxDiagnosticsController(
             ?? throw new InvalidOperationException("The client socket address is unavailable.");
         var serverAddress = connection.LocalIpAddress
             ?? throw new InvalidOperationException("The server socket address is unavailable.");
+        var clientPort = connection.RemotePort;
+        var configuration = HttpContext.RequestServices.GetService<IConfiguration>();
+        if (configuration is not null
+            && IPAddress.TryParse(configuration["TaxHub:HmrcSandbox:PublicServerAddress"], out var publicServer))
+        {
+            serverAddress = publicServer;
+            if (TryParseForwardedClient(Request.Headers["X-Forwarded-For"].ToString(), out var forwardedAddress,
+                    out var forwardedPort))
+            {
+                clientAddress = forwardedAddress;
+                clientPort = forwardedPort ?? clientPort;
+            }
+        }
         var browser = ToBrowserFacts(capture, User);
-        var facts = new CollectedFraudSessionFacts(browser, Normalize(clientAddress), connection.RemotePort,
+        var facts = new CollectedFraudSessionFacts(browser, Normalize(clientAddress), clientPort,
             Normalize(serverAddress));
         var outcome = await diagnostics.ValidateAsync(Actor(), facts, cancellationToken);
         if (outcome.RequiresAuthorisation)
@@ -175,6 +188,22 @@ public sealed class HmrcSandboxDiagnosticsController(
 
     private static IPAddress Normalize(IPAddress address) =>
         address.IsIPv4MappedToIPv6 ? address.MapToIPv4() : address;
+
+    private static bool TryParseForwardedClient(string value, out IPAddress address, out int? port)
+    {
+        address = IPAddress.None;
+        port = null;
+        var first = value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .FirstOrDefault();
+        if (string.IsNullOrWhiteSpace(first)) return false;
+        if (IPEndPoint.TryParse(first, out var endpoint))
+        {
+            address = Normalize(endpoint.Address);
+            port = endpoint.Port;
+            return true;
+        }
+        return IPAddress.TryParse(first.Trim('[', ']'), out address!);
+    }
 }
 
 public sealed class WebHarnessAuthenticationOptions

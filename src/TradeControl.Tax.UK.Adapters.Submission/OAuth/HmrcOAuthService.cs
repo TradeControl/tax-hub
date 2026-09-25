@@ -31,10 +31,10 @@ public sealed class HmrcOAuthService : IDisposable
 
     public static HmrcOAuthService CreateFileBackedSandbox(string grantStorePath,
         ReadOnlySpan<byte> encryptionKey, ISecretProvider secrets, IHmrcOAuthTokenEndpoint tokens,
-        TimeProvider? clock = null)
+        TimeProvider? clock = null, HmrcOAuthOptions? options = null)
     {
         var cipher = new AesGcmOAuthStoreCipher(encryptionKey);
-        var service = new HmrcOAuthService(EnvironmentSelector.Sandbox(), HmrcOAuthOptions.LocalSandbox,
+        var service = new HmrcOAuthService(EnvironmentSelector.Sandbox(), options ?? HmrcOAuthOptions.LocalSandbox,
             secrets, new FileOAuthGrantStore(grantStorePath, cipher), tokens, clock);
         service._ownedResourceHolder = cipher;
         return service;
