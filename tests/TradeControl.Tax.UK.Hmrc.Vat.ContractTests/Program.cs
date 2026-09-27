@@ -63,7 +63,7 @@ var bytesAgain = VatJson.SerializeCanonical(request);
 var json = Encoding.UTF8.GetString(bytes);
 Assert(bytes.SequenceEqual(bytesAgain) && (bytes.Length < 3 || !bytes.AsSpan(0, 3).SequenceEqual(new byte[] { 0xEF, 0xBB, 0xBF })),
     "VAT canonical JSON is not deterministic BOM-free UTF-8.");
-Assert(json == "{\"periodKey\":\"24A1\",\"vatDueSales\":0,\"vatDueAcquisitions\":1.25,\"totalVatDue\":1.25,\"vatReclaimedCurrPeriod\":0,\"netVatDue\":1.25,\"totalValueSalesExVat\":0,\"totalValuePurchasesExVat\":1,\"totalValueGoodsSuppliedExVat\":0,\"totalAcquisitionsExVat\":0,\"finalised\":true}",
+Assert(json == "{\"periodKey\":\"24A1\",\"vatDueSales\":0,\"vatDueAcquisitions\":1.25,\"totalVatDue\":1.25,\"vatReclaimedCurrPeriod\":0,\"netVatDue\":1.25,\"totalValueSalesExVAT\":0,\"totalValuePurchasesExVAT\":1,\"totalValueGoodsSuppliedExVAT\":0,\"totalAcquisitionsExVAT\":0,\"finalised\":true}",
     "VAT canonical request bytes changed.");
 using (var document = JsonDocument.Parse(bytes))
 {

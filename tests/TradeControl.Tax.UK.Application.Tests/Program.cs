@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text;
 using System.Text.Json;
 using TradeControl.Tax.Data;
 using TradeControl.Tax.UK.Application.DataProvision;
@@ -165,6 +166,21 @@ var vatPrepared = await new VatReturnPreparer(new VatReader(vat), new Readiness(
 Assert(!vatPrepared.HasErrors && vatPrepared.HasBody
     && vatPrepared.RelativePath == "/organisations/vat/123456789/returns",
     "The VAT fixture did not pass through the complete offline preparation pipeline.");
+var authorityVat = Encoding.UTF8.GetBytes("""
+    {"periodKey":"26A1","vatDueSales":0,"vatDueAcquisitions":125.25,"totalVatDue":125.25,"vatReclaimedCurrPeriod":25.25,"netVatDue":100,"totalValueSalesExVAT":1000,"totalValuePurchasesExVAT":500,"totalValueGoodsSuppliedExVAT":0,"totalAcquisitionsExVAT":0}
+    """);
+var reconciledVat = VatReturnReconciliation.Compare(vatPrepared, authorityVat);
+Assert(reconciledVat.Matches && reconciledVat.Differences.Count == 0
+    && reconciledVat.PreparedBodySha256 == vatPrepared.BodySha256
+    && reconciledVat.SourceDataset == "Cash.vwTaxVatSubmission"
+    && reconciledVat.SourceSnapshotToken == "VAT-0001",
+    "The HMRC VAT view did not reconcile to the exact authoritative prepared snapshot.");
+var mismatchedVat = VatReturnReconciliation.Compare(vatPrepared,
+    Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(authorityVat).Replace(
+        "\"netVatDue\":100", "\"netVatDue\":99.99", StringComparison.Ordinal)));
+Assert(!mismatchedVat.Matches && mismatchedVat.Differences.Single()
+        == new VatReturnDifference("netVatDue", "100", "99.99"),
+    "A changed HMRC VAT box was not reported as an explicit reconciliation difference.");
 var gateway = new CapturingGateway();
 var dispatchContext = new AuthorityDispatchContext("tenant-01", "principal-01", "actor-01", "approval-01", "facts-01");
 foreach (var prepared in new[] { vatPrepared, cumulativePrepared, standardPrepared })
@@ -175,10 +191,10 @@ foreach (var prepared in new[] { vatPrepared, cumulativePrepared, standardPrepar
         && gateway.Received!.BodyBytes!.Value.AsSpan().SequenceEqual(prepared.BodyBytes!.Value.AsSpan()),
         "The Objective 4 handoff changed the prepared request instance or exact body bytes.");
 }
-Assert(vatPrepared.BodySha256 == "5B8376A5A0D38E781DB04880F212A82580726FF5789EA556C1F0C75564CB07C9"
+Assert(vatPrepared.BodySha256 == "366338B8F462782285C85EEAC45EB3DFBD65E8ABB24D68EC94EAE6E2816A4D01"
     && cumulativePrepared.BodySha256 == "B451B9B75627D430B39231D8B2A2074F63DC26A988B60CC33C8866E92EAC4494"
     && standardPrepared.BodySha256 == "2823706A60A5AB43E48B3A00410752DF730A910DFB0521F4E5FA8282BCFBD302",
-    "An approved VAT, MIN or STD offline prepared-body snapshot changed.");
+    $"An approved VAT, MIN or STD offline prepared-body snapshot changed: VAT={vatPrepared.BodySha256}, MIN={cumulativePrepared.BodySha256}, STD={standardPrepared.BodySha256}.");
 Assert(vatPrepared.RequiredOAuthScope == "write:vat" && vatPrepared.ExpectedSuccessStatusCode == 201
     && vatPrepared.ResponseBodyExpectation == PreparedApiResponseBodyExpectation.Json
     && cumulativePrepared.RequiredOAuthScope == "write:self-assessment"
@@ -300,13 +316,13 @@ static VatReturnSource ReadVatFixture()
     var values = root.GetProperty("values").EnumerateArray().Select(x => x.GetDecimal()).ToArray();
     var keys = new[] { "VAT-DUE-SALES", "VAT-DUE-ACQUISITIONS", "TOTAL-VAT-DUE", "VAT-RECLAIMED",
         "NET-VAT-DUE", "SALES-EX-VAT", "PURCHASES-EX-VAT", "GOODS-SUPPLIED-EX-VAT", "ACQUISITIONS-EX-VAT" };
-    var facts = keys.Select((key, index) => Provenance("vat-return", key)).ToArray();
+    var facts = keys.Select((key, index) => Provenance("Cash.vwTaxVatSubmission", key)).ToArray();
     TaxFact<decimal> Fact(int index) => new(keys[index], keys[index],
         values[index] == 0m ? TaxValue<decimal>.ExplicitZero(0m) : TaxValue<decimal>.Present(values[index]), facts[index]);
-    var adjustmentProvenance = Provenance("vat-return", "VAT-ADJUSTMENT");
+    var adjustmentProvenance = Provenance("Cash.vwTaxVatSubmission", "VAT-ADJUSTMENT");
     var adjustment = new TaxFact<decimal>("VAT-ADJUSTMENT", "VAT adjustment",
         TaxValue<decimal>.ExplicitZero(0m), adjustmentProvenance);
-    var provenance = Dataset(root, "vat-return", facts.Append(adjustmentProvenance).ToArray());
+    var provenance = Dataset(root, "Cash.vwTaxVatSubmission", facts.Append(adjustmentProvenance).ToArray());
     return new(subject, period, Fact(0), Fact(1), adjustment, Fact(2), Fact(3), Fact(4), Fact(5), Fact(6), Fact(7), Fact(8), provenance);
 }
 

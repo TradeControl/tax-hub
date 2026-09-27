@@ -1,6 +1,8 @@
 using System.Globalization;
 using System.Net;
+using System.Security.Cryptography;
 using System.Security.Claims;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authorization;
@@ -8,7 +10,10 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 using TradeControl.Tax.UK.Adapters.Submission.FraudPrevention;
 using TradeControl.Tax.UK.Adapters.Submission.OAuth;
+using TradeControl.Tax.UK.Application.Preparation;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Hmrc;
+using TradeControl.Tax.UK.WebHarness.Diagnostics.Preparation;
+using TradeControl.Tax.UK.Hmrc.Vat.v1_0.Returns;
 
 namespace TradeControl.Tax.UK.WebHarness.Controllers;
 
@@ -17,9 +22,18 @@ namespace TradeControl.Tax.UK.WebHarness.Controllers;
 [Route("diagnostics/hmrc")]
 public sealed class HmrcSandboxDiagnosticsController(
     IHmrcSandboxDiagnostics diagnostics,
-    IOptions<WebHarnessAuthenticationOptions> authenticationOptions) : ControllerBase
+    IOptions<WebHarnessAuthenticationOptions> authenticationOptions,
+    PreparedApiRequestStore preparedRequests) : ControllerBase
 {
     private const string BrowserSessionKey = "tax-hub-fraud-browser-v1";
+    public const string VatDeclaration =
+        "I confirm that the VAT return is true and complete and approve this exact digest for submission.";
+
+    public sealed record SubmitPreparedVatReturnRequest(
+        string PreparationId,
+        string ExpectedBodySha256,
+        string ApprovalReference,
+        string Declaration);
 
     [AllowAnonymous]
     [HttpGet("sign-in")]
@@ -35,6 +49,14 @@ public sealed class HmrcSandboxDiagnosticsController(
     {
         if (!diagnostics.Enabled) return NotFound();
         var start = await diagnostics.BeginAuthorisationAsync(Actor(), cancellationToken);
+        return Redirect(start.AuthorisationUri.AbsoluteUri);
+    }
+
+    [HttpGet("authorize-write")]
+    public async Task<IActionResult> AuthorizeWrite(CancellationToken cancellationToken)
+    {
+        if (!diagnostics.Enabled) return NotFound();
+        var start = await diagnostics.BeginWriteAuthorisationAsync(Actor(), cancellationToken);
         return Redirect(start.AuthorisationUri.AbsoluteUri);
     }
 
@@ -109,27 +131,7 @@ public sealed class HmrcSandboxDiagnosticsController(
             });
         }
 
-        var connection = HttpContext.Connection;
-        var clientAddress = connection.RemoteIpAddress
-            ?? throw new InvalidOperationException("The client socket address is unavailable.");
-        var serverAddress = connection.LocalIpAddress
-            ?? throw new InvalidOperationException("The server socket address is unavailable.");
-        var clientPort = connection.RemotePort;
-        var configuration = HttpContext.RequestServices.GetService<IConfiguration>();
-        if (configuration is not null
-            && IPAddress.TryParse(configuration["TaxHub:HmrcSandbox:PublicServerAddress"], out var publicServer))
-        {
-            serverAddress = publicServer;
-            if (TryParseForwardedClient(Request.Headers["X-Forwarded-For"].ToString(), out var forwardedAddress,
-                    out var forwardedPort))
-            {
-                clientAddress = forwardedAddress;
-                clientPort = forwardedPort ?? clientPort;
-            }
-        }
-        var browser = ToBrowserFacts(capture, User);
-        var facts = new CollectedFraudSessionFacts(browser, Normalize(clientAddress), clientPort,
-            Normalize(serverAddress));
+        var facts = CollectSessionFacts(capture);
         var outcome = await diagnostics.ValidateAsync(Actor(), facts, cancellationToken);
         if (outcome.RequiresAuthorisation)
         {
@@ -148,6 +150,199 @@ public sealed class HmrcSandboxDiagnosticsController(
         Response.ContentLength = response.Body.Length;
         await Response.Body.WriteAsync(response.Body, cancellationToken);
         return new EmptyResult();
+    }
+
+    [HttpGet("vat/obligations")]
+    public Task<IActionResult> VatObligations([FromQuery] string vrn, [FromQuery] DateOnly? from,
+        [FromQuery] DateOnly? to, [FromQuery] string? status, CancellationToken cancellationToken) =>
+        Enquire(new BodylessRequestDescriber(new PreparedApiRequestPipeline()).Describe(
+            new DescribeVatObligations(vrn, from, to, status)), cancellationToken);
+
+    [HttpGet("vat/returns/{vrn}/{periodKey}")]
+    public Task<IActionResult> VatReturn([FromRoute] string vrn, [FromRoute] string periodKey,
+        CancellationToken cancellationToken) =>
+        Enquire(new BodylessRequestDescriber(new PreparedApiRequestPipeline()).Describe(
+            new DescribeVatReturn(vrn, periodKey)), cancellationToken);
+
+    [HttpGet("vat/returns/reconcile-prepared/{preparationId}")]
+    public async Task<IActionResult> ReconcilePreparedVatReturn([FromRoute] string preparationId,
+        CancellationToken cancellationToken)
+    {
+        if (!diagnostics.Enabled) return NotFound();
+        if (!preparedRequests.TryGet(preparationId, out var prepared)) return NotFound(new
+        {
+            status = "prepared-request-not-found",
+            detail = "Prepare the VAT return again; preview entries are deliberately short-lived."
+        });
+        if (!TryVatIdentity(prepared, out var vrn, out var periodKey))
+            return UnprocessableEntity(new { status = "prepared-vat-identity-unavailable" });
+
+        var capture = BrowserCapture();
+        if (capture is null) return BrowserFactsRequired("reconciliation");
+        var request = new BodylessRequestDescriber(new PreparedApiRequestPipeline()).Describe(
+            new DescribeVatReturn(vrn, periodKey));
+        var enquiry = await diagnostics.EnquireAsync(Actor(), CollectSessionFacts(capture), request,
+            cancellationToken);
+        if (enquiry.ReauthorisationReason.HasValue || enquiry.Response is null)
+            return await WriteAuthorityResult(enquiry, "/diagnostics/hmrc/authorize", cancellationToken);
+
+        VatReturnReconciliationResult reconciliation;
+        try { reconciliation = VatReturnReconciliation.Compare(prepared, enquiry.Response); }
+        catch (InvalidOperationException)
+        {
+            return UnprocessableEntity(new { status = "prepared-vat-reconciliation-unavailable" });
+        }
+        return reconciliation.Matches ? Ok(reconciliation) : Conflict(reconciliation);
+    }
+
+    [HttpPost("vat/returns/submit-prepared")]
+    public async Task<IActionResult> SubmitPreparedVatReturn(
+        [FromBody] SubmitPreparedVatReturnRequest approval, CancellationToken cancellationToken)
+    {
+        if (!diagnostics.Enabled) return NotFound();
+        if (!preparedRequests.TryGet(approval.PreparationId, out var prepared)) return NotFound(new
+        {
+            status = "prepared-request-not-found",
+            detail = "Prepare and review the VAT return again; preview entries are deliberately short-lived."
+        });
+        if (prepared.OperationId != "vat.returns.submit" || prepared.Method != "POST"
+            || prepared.BodyBytes is not { } body || prepared.BodySha256 is null)
+            return UnprocessableEntity(new { status = "not-an-approved-vat-submission" });
+        if (!CryptographicOperations.FixedTimeEquals(
+                Encoding.ASCII.GetBytes(prepared.BodySha256),
+                Encoding.ASCII.GetBytes((approval.ExpectedBodySha256 ?? string.Empty).ToUpperInvariant())))
+            return Conflict(new { status = "reviewed-digest-does-not-match" });
+        if (!string.Equals(approval.Declaration, VatDeclaration, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(approval.ApprovalReference)
+            || approval.ApprovalReference.Length > 128)
+            return BadRequest(new
+            {
+                status = "explicit-approval-required",
+                declaration = VatDeclaration
+            });
+
+        VatReturnRequest? vat;
+        try
+        {
+            vat = JsonSerializer.Deserialize<VatReturnRequest>(body.AsSpan(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (JsonException) { vat = null; }
+        if (vat is null || !TryVatIdentity(prepared, out var vrn, out var periodKey)
+            || !string.Equals(vat.PeriodKey, periodKey, StringComparison.Ordinal))
+            return UnprocessableEntity(new { status = "prepared-vat-identity-unavailable" });
+
+        var capture = BrowserCapture();
+        if (capture is null) return BrowserFactsRequired("submission");
+
+        var subjectPeriod = Fingerprint($"{vrn}:{vat.PeriodKey.Trim()}");
+        var result = await diagnostics.DispatchAsync(Actor(), CollectSessionFacts(capture), prepared,
+            approval.ApprovalReference.Trim(), subjectPeriod, subjectPeriod, cancellationToken);
+        return await WriteAuthorityResult(result, "/diagnostics/hmrc/authorize-write", cancellationToken);
+    }
+
+    private async Task<IActionResult> Enquire(PreparedApiRequest request, CancellationToken cancellationToken)
+    {
+        if (!diagnostics.Enabled) return NotFound();
+        var capture = BrowserCapture();
+        if (capture is null)
+            return BrowserFactsRequired("enquiry");
+        var enquiry = await diagnostics.EnquireAsync(Actor(), CollectSessionFacts(capture), request,
+            cancellationToken);
+        return await WriteAuthorityResult(enquiry, "/diagnostics/hmrc/authorize", cancellationToken);
+    }
+
+    private async Task<IActionResult> WriteAuthorityResult(HmrcVatEnquiryOutcome enquiry,
+        string authorizePath, CancellationToken cancellationToken)
+    {
+        if (enquiry.ReauthorisationReason.HasValue)
+        {
+            Response.Headers["X-TaxHub-Hmrc-Authorize"] = authorizePath;
+            return Unauthorized(new
+            {
+                status = "reauthorization-required",
+                reason = enquiry.ReauthorisationReason.Value.ToString(),
+                authorize = authorizePath
+            });
+        }
+        if (enquiry.Response is null)
+            return StatusCode(enquiry.Outcome.ActualStatusCode ?? StatusCodes.Status502BadGateway, new
+            {
+                status = enquiry.Outcome.Kind.ToString(),
+                code = enquiry.Outcome.OutcomeCode,
+                actualStatusCode = enquiry.Outcome.ActualStatusCode,
+                attemptReference = enquiry.Outcome.AttemptReference
+            });
+        Response.StatusCode = enquiry.Outcome.ActualStatusCode ?? StatusCodes.Status502BadGateway;
+        Response.ContentType = "application/json";
+        Response.ContentLength = enquiry.Response.Length;
+        await Response.Body.WriteAsync(enquiry.Response, cancellationToken);
+        return new EmptyResult();
+    }
+
+    private BrowserFraudCapture? BrowserCapture()
+    {
+        var capturedJson = HttpContext.Session.GetString(BrowserSessionKey);
+        try
+        {
+            return string.IsNullOrWhiteSpace(capturedJson)
+                ? null : JsonSerializer.Deserialize<BrowserFraudCapture>(capturedJson);
+        }
+        catch (JsonException) { return null; }
+    }
+
+    private ConflictObjectResult BrowserFactsRequired(string operation) => Conflict(new
+    {
+        status = "browser-facts-required",
+        detail = $"Reload Swagger so the WebHarness can capture browser and session facts before {operation}."
+    });
+
+    private static bool TryVatIdentity(PreparedApiRequest prepared, out string vrn, out string periodKey)
+    {
+        vrn = string.Empty;
+        periodKey = string.Empty;
+        if (prepared.OperationId != "vat.returns.submit" || prepared.Method != "POST"
+            || prepared.BodyBytes is not { } body) return false;
+        var segments = prepared.RelativePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length != 4 || segments[0] != "organisations" || segments[1] != "vat"
+            || segments[3] != "returns" || segments[2].Length != 9 || !segments[2].All(char.IsDigit)) return false;
+        try
+        {
+            var vat = JsonSerializer.Deserialize<VatReturnRequest>(body.AsSpan(),
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (vat is null || string.IsNullOrWhiteSpace(vat.PeriodKey)) return false;
+            vrn = segments[2];
+            periodKey = vat.PeriodKey.Trim();
+            return true;
+        }
+        catch (JsonException) { return false; }
+    }
+
+    private static string Fingerprint(string value) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
+    private CollectedFraudSessionFacts CollectSessionFacts(BrowserFraudCapture capture)
+    {
+        var connection = HttpContext.Connection;
+        var clientAddress = connection.RemoteIpAddress
+            ?? throw new InvalidOperationException("The client socket address is unavailable.");
+        var serverAddress = connection.LocalIpAddress
+            ?? throw new InvalidOperationException("The server socket address is unavailable.");
+        var clientPort = connection.RemotePort;
+        var configuration = HttpContext.RequestServices.GetService<IConfiguration>();
+        if (configuration is not null
+            && IPAddress.TryParse(configuration["TaxHub:HmrcSandbox:PublicServerAddress"], out var publicServer))
+        {
+            serverAddress = publicServer;
+            if (TryParseForwardedClient(Request.Headers["X-Forwarded-For"].ToString(), out var forwardedAddress,
+                    out var forwardedPort))
+            {
+                clientAddress = forwardedAddress;
+                clientPort = forwardedPort ?? clientPort;
+            }
+        }
+        return new(ToBrowserFacts(capture, User), Normalize(clientAddress), clientPort,
+            Normalize(serverAddress));
     }
 
     private HmrcSandboxActor Actor()

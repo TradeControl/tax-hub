@@ -135,8 +135,10 @@ public sealed class PreparedApiRequest
         Require(contractVersion, nameof(contractVersion));
         Require(method, nameof(method));
         if (string.IsNullOrWhiteSpace(relativePath) || !relativePath.StartsWith('/')
+            || relativePath.StartsWith("//", StringComparison.Ordinal)
             || relativePath.Contains('{') || relativePath.Contains('}')
-            || Uri.TryCreate(relativePath, UriKind.Absolute, out _))
+            || relativePath.Contains('\\') || relativePath.Contains('?') || relativePath.Contains('#')
+            || relativePath.Any(char.IsControl))
             throw new ArgumentException("A resolved relative authority path is required.", nameof(relativePath));
 
         OperationId = operationId;
@@ -248,13 +250,16 @@ public interface IPreparedApiRequestGateway
 public sealed class AuthorityDispatchContext
 {
     public AuthorityDispatchContext(string tenantReference, string authorisationPrincipalReference,
-        string actorReference, string approvalReference, string sealedClientFactsReference)
+        string actorReference, string approvalReference, string sealedClientFactsReference,
+        string? logicalSubmissionReference = null, string? subjectPeriodReference = null)
     {
         TenantReference = RequiredReference(tenantReference, nameof(tenantReference));
         AuthorisationPrincipalReference = RequiredReference(authorisationPrincipalReference, nameof(authorisationPrincipalReference));
         ActorReference = RequiredReference(actorReference, nameof(actorReference));
         ApprovalReference = RequiredReference(approvalReference, nameof(approvalReference));
         SealedClientFactsReference = RequiredReference(sealedClientFactsReference, nameof(sealedClientFactsReference));
+        LogicalSubmissionReference = OptionalReference(logicalSubmissionReference, nameof(logicalSubmissionReference));
+        SubjectPeriodReference = OptionalReference(subjectPeriodReference, nameof(subjectPeriodReference));
     }
 
     public string TenantReference { get; }
@@ -262,6 +267,8 @@ public sealed class AuthorityDispatchContext
     public string ActorReference { get; }
     public string ApprovalReference { get; }
     public string SealedClientFactsReference { get; }
+    public string? LogicalSubmissionReference { get; }
+    public string? SubjectPeriodReference { get; }
 
     private static string RequiredReference(string value, string parameterName)
     {
@@ -269,6 +276,9 @@ public sealed class AuthorityDispatchContext
             throw new ArgumentException("A dispatch context reference cannot be empty.", parameterName);
         return value.Trim();
     }
+
+    private static string? OptionalReference(string? value, string parameterName) =>
+        string.IsNullOrWhiteSpace(value) ? null : RequiredReference(value, parameterName);
 }
 
 public enum PreparedApiOutcomeKind

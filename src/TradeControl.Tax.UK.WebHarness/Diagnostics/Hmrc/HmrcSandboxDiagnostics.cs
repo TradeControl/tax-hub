@@ -3,6 +3,8 @@ using System.Security.Cryptography;
 using TradeControl.Tax.UK.Adapters.Submission.Configuration;
 using TradeControl.Tax.UK.Adapters.Submission.FraudPrevention;
 using TradeControl.Tax.UK.Adapters.Submission.OAuth;
+using TradeControl.Tax.UK.Adapters.Submission.Audit;
+using TradeControl.Tax.UK.Adapters.Submission.Rest;
 using TradeControl.Tax.UK.Application.Preparation;
 
 namespace TradeControl.Tax.UK.WebHarness.Diagnostics.Hmrc;
@@ -29,16 +31,28 @@ public sealed record FraudHeaderDiagnosticOutcome(
     public bool RequiresAuthorisation => ReauthorisationReason.HasValue;
 }
 
+public sealed record HmrcVatEnquiryOutcome(
+    PreparedApiOutcome Outcome,
+    byte[]? Response,
+    OAuthReauthorisationReason? ReauthorisationReason);
+
 public interface IHmrcSandboxDiagnostics
 {
     bool Enabled { get; }
     Task<OAuthAuthorisationStart> BeginAuthorisationAsync(HmrcSandboxActor actor,
+        CancellationToken cancellationToken = default);
+    Task<OAuthAuthorisationStart> BeginWriteAuthorisationAsync(HmrcSandboxActor actor,
         CancellationToken cancellationToken = default);
     Task<OAuthAccessOutcome> CompleteCallbackAsync(HmrcSandboxActor actor, OAuthCallback callback,
         CancellationToken cancellationToken = default);
     Task DisconnectAsync(HmrcSandboxActor actor, CancellationToken cancellationToken = default);
     Task<FraudHeaderDiagnosticOutcome> ValidateAsync(HmrcSandboxActor actor, CollectedFraudSessionFacts facts,
         CancellationToken cancellationToken = default);
+    Task<HmrcVatEnquiryOutcome> EnquireAsync(HmrcSandboxActor actor, CollectedFraudSessionFacts facts,
+        PreparedApiRequest request, CancellationToken cancellationToken = default);
+    Task<HmrcVatEnquiryOutcome> DispatchAsync(HmrcSandboxActor actor, CollectedFraudSessionFacts facts,
+        PreparedApiRequest request, string approvalReference, string? logicalSubmissionReference,
+        string? subjectPeriodReference, CancellationToken cancellationToken = default);
 }
 
 public sealed class HmrcSandboxDiagnostics : IHmrcSandboxDiagnostics, IDisposable
@@ -50,10 +64,11 @@ public sealed class HmrcSandboxDiagnostics : IHmrcSandboxDiagnostics, IDisposabl
     private readonly HmrcOAuthTokenEndpoint _tokenEndpoint;
     private readonly HmrcFraudHeaderValidator _validator;
     private readonly IReadOnlyDictionary<string, string> _licenseIds;
+    private readonly string _runtimeRoot;
 
     private HmrcSandboxDiagnostics(string fraudRoot, byte[] fraudKey, HmrcOAuthService oauth,
         HmrcOAuthTokenEndpoint tokenEndpoint, HmrcFraudHeaderValidator validator,
-        IReadOnlyDictionary<string, string> licenseIds)
+        IReadOnlyDictionary<string, string> licenseIds, string runtimeRoot)
     {
         _fraudRoot = fraudRoot;
         _fraudKey = fraudKey;
@@ -61,6 +76,7 @@ public sealed class HmrcSandboxDiagnostics : IHmrcSandboxDiagnostics, IDisposabl
         _tokenEndpoint = tokenEndpoint;
         _validator = validator;
         _licenseIds = licenseIds;
+        _runtimeRoot = runtimeRoot;
     }
 
     public bool Enabled => true;
@@ -93,7 +109,7 @@ public sealed class HmrcSandboxDiagnostics : IHmrcSandboxDiagnostics, IDisposabl
             var licenseIds = configuration.GetSection("TaxHub:HmrcSandbox:LicenseIds").GetChildren()
                 .ToDictionary(item => item.Key, item => item.Value ?? string.Empty, StringComparer.Ordinal);
             return new(Path.Combine(runtimeRoot, "fraud-contexts"), fraudKey, oauth, tokenEndpoint,
-                new HmrcFraudHeaderValidator(environment), licenseIds);
+                new HmrcFraudHeaderValidator(environment), licenseIds, runtimeRoot);
         }
         finally { CryptographicOperations.ZeroMemory(oauthKey); }
     }
@@ -143,12 +159,19 @@ public sealed class HmrcSandboxDiagnostics : IHmrcSandboxDiagnostics, IDisposabl
         CancellationToken cancellationToken = default) =>
         _oauth.BeginAuthorisationAsync(OAuthContext(actor), HmrcOAuthScopes.ReadVat, cancellationToken);
 
+    public Task<OAuthAuthorisationStart> BeginWriteAuthorisationAsync(HmrcSandboxActor actor,
+        CancellationToken cancellationToken = default) =>
+        _oauth.BeginAuthorisationAsync(OAuthContext(actor), HmrcOAuthScopes.WriteVat, cancellationToken);
+
     public Task<OAuthAccessOutcome> CompleteCallbackAsync(HmrcSandboxActor actor, OAuthCallback callback,
         CancellationToken cancellationToken = default) =>
         _oauth.CompleteCallbackAsync(OAuthContext(actor), callback, cancellationToken);
 
-    public Task DisconnectAsync(HmrcSandboxActor actor, CancellationToken cancellationToken = default) =>
-        _oauth.RevokeAsync(OAuthContext(actor), HmrcOAuthScopes.ReadVat, cancellationToken);
+    public async Task DisconnectAsync(HmrcSandboxActor actor, CancellationToken cancellationToken = default)
+    {
+        await _oauth.RevokeAsync(OAuthContext(actor), HmrcOAuthScopes.ReadVat, cancellationToken);
+        await _oauth.RevokeAsync(OAuthContext(actor), HmrcOAuthScopes.WriteVat, cancellationToken);
+    }
 
     public async Task<FraudHeaderDiagnosticOutcome> ValidateAsync(HmrcSandboxActor actor,
         CollectedFraudSessionFacts facts,
@@ -179,6 +202,56 @@ public sealed class HmrcSandboxDiagnostics : IHmrcSandboxDiagnostics, IDisposabl
         return new(response, null);
     }
 
+    public Task<HmrcVatEnquiryOutcome> EnquireAsync(HmrcSandboxActor actor,
+        CollectedFraudSessionFacts facts, PreparedApiRequest request,
+        CancellationToken cancellationToken = default) =>
+        DispatchAsync(actor, facts, request, "web-harness-vat-enquiry", null, null, cancellationToken);
+
+    public async Task<HmrcVatEnquiryOutcome> DispatchAsync(HmrcSandboxActor actor,
+        CollectedFraudSessionFacts facts, PreparedApiRequest request, string approvalReference,
+        string? logicalSubmissionReference, string? subjectPeriodReference,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(facts);
+        ArgumentNullException.ThrowIfNull(request);
+        var identity = ActorIdentity(actor);
+        var topology = FraudDeploymentTopology.SandboxValidatorDiagnosticDirect(
+            "web-harness-observed-direct", facts.ServerAddress);
+        var version = typeof(HmrcSandboxDiagnostics).Assembly.GetName().Version?.ToString(3) ?? "development";
+        var vendor = new FraudVendorConfiguration("Trade Control Tax Hub",
+            new Dictionary<string, string> { ["tax-hub-web-harness"] = version }, _licenseIds);
+        using var fraud = FraudHeaderService.CreateFileBackedSandboxValidatorDiagnostic(
+            _fraudRoot, _fraudKey, topology, vendor);
+        var reference = await fraud.CaptureAndSealAsync(identity, facts.Browser,
+            new TrustedIngressConnectionObservation(facts.ClientAddress, facts.ClientPort,
+                DateTimeOffset.UtcNow), cancellationToken);
+        var dispatch = new AuthorityDispatchContext(Tenant, actor.PrincipalReference, actor.ActorReference,
+            approvalReference, reference.Value, logicalSubmissionReference, subjectPeriodReference);
+        var attempts = new FileSubmissionAttemptStore(SubmissionAttemptStoreOptions.SevenYearMetadata(
+            Path.Combine(_runtimeRoot, "submission-attempts.json")));
+        var content = new FileSubmissionContentStore(new(
+            Path.Combine(_runtimeRoot, "protected-submission-content")));
+        using var gateway = new HmrcPreparedApiRequestGateway(EnvironmentSelector.Sandbox(), _oauth, fraud,
+            attempts, content);
+        var outcome = await gateway.SendAsync(request, dispatch, cancellationToken);
+        byte[]? response = null;
+        if (outcome.SafeResponseReference is not null)
+            response = await content.ReadAsync(Tenant, actor.PrincipalReference,
+                outcome.SafeResponseReference, cancellationToken);
+        var reason = ParseReauthorisation(outcome.OutcomeCode);
+        return new(outcome, response, reason);
+    }
+
+    private static OAuthReauthorisationReason? ParseReauthorisation(string code)
+    {
+        const string prefix = "OAUTH-REAUTHORISATION-";
+        if (!code.StartsWith(prefix, StringComparison.Ordinal)) return null;
+        var compact = code[prefix.Length..];
+        return Enum.GetValues<OAuthReauthorisationReason>().SingleOrDefault(value =>
+            value.ToString().Equals(compact, StringComparison.OrdinalIgnoreCase));
+    }
+
     private static FraudActorIdentity ActorIdentity(HmrcSandboxActor actor) =>
         new FraudActorIdentity(Tenant, actor.PrincipalReference, actor.ActorReference).Validate();
 
@@ -204,6 +277,9 @@ public sealed class DisabledHmrcSandboxDiagnostics : IHmrcSandboxDiagnostics
     public Task<OAuthAuthorisationStart> BeginAuthorisationAsync(HmrcSandboxActor actor,
         CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException("HMRC sandbox diagnostics are disabled.");
+    public Task<OAuthAuthorisationStart> BeginWriteAuthorisationAsync(HmrcSandboxActor actor,
+        CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException("HMRC sandbox diagnostics are disabled.");
     public Task<OAuthAccessOutcome> CompleteCallbackAsync(HmrcSandboxActor actor, OAuthCallback callback,
         CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException("HMRC sandbox diagnostics are disabled.");
@@ -211,6 +287,15 @@ public sealed class DisabledHmrcSandboxDiagnostics : IHmrcSandboxDiagnostics
         throw new InvalidOperationException("HMRC sandbox diagnostics are disabled.");
     public Task<FraudHeaderDiagnosticOutcome> ValidateAsync(HmrcSandboxActor actor,
         CollectedFraudSessionFacts facts,
+        CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException("HMRC sandbox diagnostics are disabled.");
+    public Task<HmrcVatEnquiryOutcome> EnquireAsync(HmrcSandboxActor actor,
+        CollectedFraudSessionFacts facts, PreparedApiRequest request,
+        CancellationToken cancellationToken = default) =>
+        throw new InvalidOperationException("HMRC sandbox diagnostics are disabled.");
+    public Task<HmrcVatEnquiryOutcome> DispatchAsync(HmrcSandboxActor actor,
+        CollectedFraudSessionFacts facts, PreparedApiRequest request, string approvalReference,
+        string? logicalSubmissionReference, string? subjectPeriodReference,
         CancellationToken cancellationToken = default) =>
         throw new InvalidOperationException("HMRC sandbox diagnostics are disabled.");
 }

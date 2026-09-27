@@ -35,6 +35,17 @@ PreparedApiRequest Request(string marker)
         [new("vrn", "123456789")], serializeBody: () => Encoding.UTF8.GetBytes($"{{\"marker\":\"{marker}\"}}"));
 }
 
+PreparedApiRequest ReconciliableVatRequest()
+{
+    var descriptor = VatOperationCatalog.All.Single(item => item.OperationId == "vat.returns.submit");
+    var body = Encoding.UTF8.GetBytes("""
+        {"periodKey":"26A1","vatDueSales":10.00,"vatDueAcquisitions":2.00,"totalVatDue":12.00,"vatReclaimedCurrPeriod":3.00,"netVatDue":9.00,"totalValueSalesExVAT":50,"totalValuePurchasesExVAT":15,"totalValueGoodsSuppliedExVAT":0,"totalAcquisitionsExVAT":0,"finalised":true}
+        """);
+    return new PreparedApiRequestPipeline().Prepare(HmrcPreparedApiContracts.From(descriptor),
+        [new("vrn", "123456789")], serializeBody: () => body,
+        sourceEvidence: [new("TradeControl", "Cash.vwTaxVatSubmission", "0x00000001")]);
+}
+
 var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero));
 var store = new PreparedApiRequestStore(new(2, TimeSpan.FromMinutes(5)), time);
 var originalFirst = Request("first");
@@ -131,6 +142,9 @@ var captureAction = diagnosticActions.Single(method => method.Name == nameof(Hmr
 var signOutAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.EndSession));
 var signInAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.BeginHostSignIn));
 var disconnectAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.Disconnect));
+var obligationsAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.VatObligations));
+var returnAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.VatReturn));
+var reconcileAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.ReconcilePreparedVatReturn));
 Assert(typeof(HmrcSandboxDiagnosticsController).GetCustomAttribute<AuthorizeAttribute>()?.AuthenticationSchemes
         == WebHarnessAuthenticationOptions.ApplicationScheme
     && signInAction.GetCustomAttribute<AllowAnonymousAttribute>() is not null,
@@ -152,23 +166,37 @@ Assert(disconnectAction.GetCustomAttribute<HttpPostAttribute>()?.Template == "di
     && disconnectAction.GetParameters().Select(parameter => parameter.ParameterType).SequenceEqual(
         [typeof(CancellationToken)]),
     "The principal-bound HMRC disconnect endpoint is missing.");
+Assert(obligationsAction.GetCustomAttribute<HttpGetAttribute>()?.Template == "vat/obligations"
+    && returnAction.GetCustomAttribute<HttpGetAttribute>()?.Template == "vat/returns/{vrn}/{periodKey}"
+    && reconcileAction.GetCustomAttribute<HttpGetAttribute>()?.Template
+        == "vat/returns/reconcile-prepared/{preparationId}"
+    && new[] { obligationsAction, returnAction }.All(method => method.GetParameters()
+        .All(parameter => parameter.GetCustomAttribute<FromBodyAttribute>() is null)),
+    "The authenticated bodyless VAT enquiry or reconciliation endpoint is missing.");
 var captureNames = typeof(BrowserFraudCapture).GetProperties().Select(property => property.Name).ToArray();
 Assert(new[] { "Token", "Secret", "Password", "PublicIp", "License" }
         .All(term => captureNames.All(name => !name.Contains(term, StringComparison.OrdinalIgnoreCase))),
     "The browser capture DTO accepts a trusted or secret fraud-header fact.");
 var swaggerActions = diagnosticActions.Where(method => method.Name is
     nameof(HmrcSandboxDiagnosticsController.Authorize)
+    or nameof(HmrcSandboxDiagnosticsController.AuthorizeWrite)
     or nameof(HmrcSandboxDiagnosticsController.Callback)
     or nameof(HmrcSandboxDiagnosticsController.CaptureBrowserSession)
     or nameof(HmrcSandboxDiagnosticsController.Validate)
     or nameof(HmrcSandboxDiagnosticsController.EndSession)
-    or nameof(HmrcSandboxDiagnosticsController.Disconnect));
+    or nameof(HmrcSandboxDiagnosticsController.Disconnect)
+    or nameof(HmrcSandboxDiagnosticsController.VatObligations)
+    or nameof(HmrcSandboxDiagnosticsController.VatReturn)
+    or nameof(HmrcSandboxDiagnosticsController.ReconcilePreparedVatReturn)
+    or nameof(HmrcSandboxDiagnosticsController.SubmitPreparedVatReturn));
 Assert(swaggerActions.All(method => method.GetCustomAttribute<ApiExplorerSettingsAttribute>()?.IgnoreApi != true),
     "An HMRC sandbox diagnostic endpoint is hidden from Swagger.");
 
 var reauthorisingDiagnostics = new ReauthorisingDiagnostics();
+var diagnosticStore = new PreparedApiRequestStore(new(10, TimeSpan.FromMinutes(5)));
 var diagnosticController = new HmrcSandboxDiagnosticsController(reauthorisingDiagnostics,
-    Options.Create(new WebHarnessAuthenticationOptions()));
+    Options.Create(new WebHarnessAuthenticationOptions()),
+    diagnosticStore);
 Assert(diagnosticController.BeginHostSignIn(null) is RedirectResult
     {
         Url: "https://localhost:44381/Identity/Account/Login?returnUrl=%2FTaxHub%2FHmrcDiagnosticsReturn"
@@ -208,6 +236,26 @@ Assert(reauthorisingDiagnostics.LastActor == new HmrcSandboxActor("identity-user
     && facts.Browser.WindowSize == new FraudWindowSize(1256, 803)
     && facts.Browser.UserIds["tax-hub-internal"] == "identity-user-1",
     "The validator did not bind browser facts and the OAuth grant to the authenticated Identity principal.");
+var preparedVat = ReconciliableVatRequest();
+var preparedVatId = await diagnosticStore.SaveAsync(preparedVat);
+reauthorisingDiagnostics.VatResponse = Encoding.UTF8.GetBytes("""
+    {"periodKey":"26A1","vatDueSales":10,"vatDueAcquisitions":2,"totalVatDue":12,"vatReclaimedCurrPeriod":3,"netVatDue":9,"totalValueSalesExVAT":50,"totalValuePurchasesExVAT":15,"totalValueGoodsSuppliedExVAT":0,"totalAcquisitionsExVAT":0}
+    """);
+var submitResult = await diagnosticController.SubmitPreparedVatReturn(new(
+    preparedVatId, preparedVat.BodySha256!, "approval-vat-001",
+    HmrcSandboxDiagnosticsController.VatDeclaration), CancellationToken.None);
+var expectedSubmissionIdentity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("123456789:26A1")));
+Assert(submitResult is EmptyResult
+    && reauthorisingDiagnostics.LastDispatchedRequest == preparedVat
+    && reauthorisingDiagnostics.LastLogicalSubmissionReference == expectedSubmissionIdentity
+    && reauthorisingDiagnostics.LastSubjectPeriodReference == expectedSubmissionIdentity,
+    "The VAT write did not bind duplicate protection to the prepared VRN and period identity.");
+var reconciliationResult = await diagnosticController.ReconcilePreparedVatReturn(
+    preparedVatId, CancellationToken.None);
+Assert(reconciliationResult is OkObjectResult { Value: VatReturnReconciliationResult { Matches: true } reconciliation }
+    && reconciliation.PreparedBodySha256 == preparedVat.BodySha256
+    && reconciliation.SourceDataset == "Cash.vwTaxVatSubmission",
+    "The WebHarness did not reconcile HMRC's return to the exact prepared source snapshot.");
 var signOutResult = await diagnosticController.EndSession();
 Assert(signOutResult is NoContentResult
     && authentication.SignedOutScheme == WebHarnessAuthenticationOptions.ApplicationScheme
@@ -280,11 +328,17 @@ sealed class ReauthorisingDiagnostics : IHmrcSandboxDiagnostics
     public HmrcSandboxActor? LastActor { get; private set; }
     public HmrcSandboxActor? DisconnectedActor { get; private set; }
     public CollectedFraudSessionFacts? LastFacts { get; private set; }
+    public byte[]? VatResponse { get; set; }
+    public PreparedApiRequest? LastDispatchedRequest { get; private set; }
+    public string? LastLogicalSubmissionReference { get; private set; }
+    public string? LastSubjectPeriodReference { get; private set; }
     public Task<OAuthAuthorisationStart> BeginAuthorisationAsync(HmrcSandboxActor actor,
         CancellationToken cancellationToken = default) =>
         Task.FromResult(new OAuthAuthorisationStart(
             new Uri("https://test-www.tax.service.gov.uk/oauth/authorize?state=redacted"),
             DateTimeOffset.UtcNow.AddMinutes(10)));
+    public Task<OAuthAuthorisationStart> BeginWriteAuthorisationAsync(HmrcSandboxActor actor,
+        CancellationToken cancellationToken = default) => BeginAuthorisationAsync(actor, cancellationToken);
     public Task<OAuthAccessOutcome> CompleteCallbackAsync(HmrcSandboxActor actor, OAuthCallback callback,
         CancellationToken cancellationToken = default) => throw new NotSupportedException();
     public Task DisconnectAsync(HmrcSandboxActor actor, CancellationToken cancellationToken = default)
@@ -299,6 +353,25 @@ sealed class ReauthorisingDiagnostics : IHmrcSandboxDiagnostics
         LastActor = actor;
         LastFacts = facts;
         return Task.FromResult(new FraudHeaderDiagnosticOutcome(null, OAuthReauthorisationReason.MissingGrant));
+    }
+    public Task<HmrcVatEnquiryOutcome> EnquireAsync(HmrcSandboxActor actor,
+        CollectedFraudSessionFacts facts, PreparedApiRequest request,
+        CancellationToken cancellationToken = default) => VatResponse is null
+            ? throw new NotSupportedException()
+            : Task.FromResult(new HmrcVatEnquiryOutcome(
+                new(PreparedApiOutcomeKind.Succeeded, "HMRC-SUCCESS", 200, "attempt-enquiry", "response-enquiry"),
+                VatResponse, null));
+    public Task<HmrcVatEnquiryOutcome> DispatchAsync(HmrcSandboxActor actor,
+        CollectedFraudSessionFacts facts, PreparedApiRequest request, string approvalReference,
+        string? logicalSubmissionReference, string? subjectPeriodReference,
+        CancellationToken cancellationToken = default)
+    {
+        LastDispatchedRequest = request;
+        LastLogicalSubmissionReference = logicalSubmissionReference;
+        LastSubjectPeriodReference = subjectPeriodReference;
+        return Task.FromResult(new HmrcVatEnquiryOutcome(
+            new(PreparedApiOutcomeKind.Succeeded, "HMRC-SUCCESS", 201, "attempt-write", "response-write"),
+            Encoding.UTF8.GetBytes("{\"processingDate\":\"2026-09-27T12:10:07Z\"}"), null));
     }
 }
 

@@ -10,5 +10,6 @@
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="TradeControl.Tax.UK.WebHarness.Tests" />
+    <InternalsVisibleTo Include="TradeControl.Tax.UK.Adapters.Submission.Tests" />
   </ItemGroup>
 </Project>

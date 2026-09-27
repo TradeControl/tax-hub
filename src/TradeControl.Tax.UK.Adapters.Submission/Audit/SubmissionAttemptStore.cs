@@ -23,14 +23,22 @@ public sealed record SubmissionAttemptReservation(
     string SubjectPeriodReference,
     string? PreparedDigest,
     string? ApprovalReference,
-    AuthorityEnvironment Environment);
+    AuthorityEnvironment Environment,
+    string? SafePayloadReference = null);
 
 public sealed record SubmissionAttemptOutcome(
     SubmissionAttemptState State,
     string OutcomeCode,
     int? ActualStatusCode = null,
     string? CorrelationReference = null,
-    string? SafeResponseReference = null);
+    string? SafeResponseReference = null,
+    SubmissionReceiptEvidence? Receipt = null);
+
+public sealed record SubmissionReceiptEvidence(
+    DateTimeOffset? ProcessingDate,
+    string? PaymentIndicator,
+    string? FormBundleNumber,
+    string? ChargeReference);
 
 public sealed record SubmissionAttemptRecord(
     string AttemptReference,
@@ -49,7 +57,9 @@ public sealed record SubmissionAttemptRecord(
     string? OutcomeCode = null,
     int? ActualStatusCode = null,
     string? CorrelationReference = null,
-    string? SafeResponseReference = null)
+    string? SafeResponseReference = null,
+    string? SafePayloadReference = null,
+    SubmissionReceiptEvidence? Receipt = null)
 {
     public bool IsWrite => Method is not "GET" and not "HEAD";
     public bool IsActive => State is SubmissionAttemptState.Reserved
@@ -77,6 +87,8 @@ public interface ISubmissionAttemptStore
         CancellationToken cancellationToken = default);
     Task<SubmissionAttemptRecord?> GetAsync(string tenantReference, string principalReference,
         string attemptReference, CancellationToken cancellationToken = default);
+    Task<SubmissionAttemptRecord> RecordPayloadAsync(string tenantReference, string principalReference,
+        string attemptReference, string safePayloadReference, CancellationToken cancellationToken = default);
     Task<SubmissionAttemptRecord> RecordOutcomeAsync(string tenantReference, string principalReference,
         string attemptReference, SubmissionAttemptOutcome outcome, CancellationToken cancellationToken = default);
 }
@@ -135,7 +147,8 @@ public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
                 reservation.Environment,
                 SubmissionAttemptState.Reserved,
                 now,
-                now);
+                now,
+                SafePayloadReference: reservation.SafePayloadReference);
             records.Add(record);
             await WriteAsync(records, cancellationToken);
             return record;
@@ -166,6 +179,38 @@ public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
         }
     }
 
+    public async Task<SubmissionAttemptRecord> RecordPayloadAsync(string tenantReference,
+        string principalReference, string attemptReference, string safePayloadReference,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateReference(tenantReference, nameof(tenantReference));
+        ValidateReference(principalReference, nameof(principalReference));
+        ValidateReference(attemptReference, nameof(attemptReference));
+        ValidateOptionalReference(safePayloadReference, 256, nameof(safePayloadReference));
+        await _fileLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var processLock = await AcquireProcessLockAsync(cancellationToken);
+            var records = await ReadAsync(cancellationToken);
+            var index = records.FindIndex(item => item.AttemptReference == attemptReference
+                && item.TenantReference == tenantReference && item.PrincipalReference == principalReference);
+            if (index < 0) throw new KeyNotFoundException("No attempt exists for the supplied tenant and principal.");
+            var current = records[index];
+            if (!current.IsWrite || current.State != SubmissionAttemptState.Reserved
+                || current.SafePayloadReference is not null)
+                throw new InvalidOperationException("A protected payload can only be attached once to a reserved write attempt.");
+            var updated = current with
+            {
+                SafePayloadReference = safePayloadReference,
+                UpdatedAt = _timeProvider.GetUtcNow()
+            };
+            records[index] = updated;
+            await WriteAsync(records, cancellationToken);
+            return updated;
+        }
+        finally { _fileLock.Release(); }
+    }
+
     public async Task<SubmissionAttemptRecord> RecordOutcomeAsync(string tenantReference, string principalReference,
         string attemptReference, SubmissionAttemptOutcome outcome, CancellationToken cancellationToken = default)
     {
@@ -191,7 +236,8 @@ public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
                 OutcomeCode = outcome.OutcomeCode,
                 ActualStatusCode = outcome.ActualStatusCode,
                 CorrelationReference = outcome.CorrelationReference,
-                SafeResponseReference = outcome.SafeResponseReference
+                SafeResponseReference = outcome.SafeResponseReference,
+                Receipt = outcome.Receipt
             };
             records[index] = updated;
             await WriteAsync(records, cancellationToken);
@@ -291,6 +337,7 @@ public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
                 || !reservation.PreparedDigest.All(Uri.IsHexDigit))
                 throw new ArgumentException("A write attempt requires a SHA-256 prepared digest.", nameof(reservation));
             ValidateReference(reservation.ApprovalReference, nameof(reservation.ApprovalReference));
+            ValidateOptionalReference(reservation.SafePayloadReference, 256, nameof(reservation.SafePayloadReference));
         }
     }
 
@@ -303,6 +350,12 @@ public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
             throw new ArgumentException("The actual HTTP status is invalid.", nameof(outcome));
         ValidateOptionalReference(outcome.CorrelationReference, 128, nameof(outcome.CorrelationReference));
         ValidateOptionalReference(outcome.SafeResponseReference, 256, nameof(outcome.SafeResponseReference));
+        if (outcome.Receipt is { } receipt)
+        {
+            ValidateOptionalReference(receipt.PaymentIndicator, 64, nameof(receipt.PaymentIndicator));
+            ValidateOptionalReference(receipt.FormBundleNumber, 128, nameof(receipt.FormBundleNumber));
+            ValidateOptionalReference(receipt.ChargeReference, 128, nameof(receipt.ChargeReference));
+        }
         if (outcome.SafeResponseReference is not null
             && Uri.TryCreate(outcome.SafeResponseReference, UriKind.Absolute, out _))
             throw new ArgumentException("Authority-returned absolute URLs cannot be stored as response references.", nameof(outcome));

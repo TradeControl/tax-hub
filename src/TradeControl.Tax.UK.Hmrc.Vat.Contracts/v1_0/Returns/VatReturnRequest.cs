@@ -15,9 +15,13 @@ public class VatReturnRequest
     public decimal VatReclaimedCurrPeriod { get; set; }
     public decimal NetVatDue { get; set; }
 
+    [JsonPropertyName("totalValueSalesExVAT")]
     public decimal TotalValueSalesExVat { get; set; }
+    [JsonPropertyName("totalValuePurchasesExVAT")]
     public decimal TotalValuePurchasesExVat { get; set; }
+    [JsonPropertyName("totalValueGoodsSuppliedExVAT")]
     public decimal TotalValueGoodsSuppliedExVat { get; set; }
+    [JsonPropertyName("totalAcquisitionsExVAT")]
     public decimal TotalAcquisitionsExVat { get; set; }
 
     public bool Finalised { get; set; }

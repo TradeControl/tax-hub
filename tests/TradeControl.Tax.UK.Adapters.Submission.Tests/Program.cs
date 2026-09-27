@@ -175,6 +175,7 @@ try
         "Prepared content can activate an authority environment.");
     assertions += await OAuthTests.RunAsync(root, provider);
     assertions += await FraudPreventionTests.RunAsync(root);
+    assertions += await RestGatewayTests.RunAsync(root, provider);
 }
 finally
 {

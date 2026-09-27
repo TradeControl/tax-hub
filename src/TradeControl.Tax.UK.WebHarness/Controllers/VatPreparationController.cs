@@ -14,6 +14,13 @@ public sealed record PrepareVatReturnRequest(
     bool Finalised = true,
     string? VatRegistrationOverride = null);
 
+public sealed record PrepareConfiguredVatReturnRequest(
+    DateOnly PeriodStart,
+    DateOnly PeriodEnd,
+    string PeriodKey,
+    bool Finalised = true,
+    string? VatRegistrationOverride = null);
+
 [ApiController]
 [Route("harness/hmrc/vat/returns")]
 public sealed class VatPreparationController : ControllerBase
@@ -21,13 +28,29 @@ public sealed class VatPreparationController : ControllerBase
     private readonly ConnectionFactory _connections;
     private readonly PreparedApiRequestPipeline _pipeline;
     private readonly PreparedApiRequestStore _store;
+    private readonly IConfiguration _configuration;
 
     public VatPreparationController(ConnectionFactory connections, PreparedApiRequestPipeline pipeline,
-        PreparedApiRequestStore store)
+        PreparedApiRequestStore store, IConfiguration configuration)
     {
         _connections = connections;
         _pipeline = pipeline;
         _store = store;
+        _configuration = configuration;
+    }
+
+    [HttpPost("prepare-configured")]
+    public Task<IActionResult> PrepareConfigured([FromBody] PrepareConfiguredVatReturnRequest request,
+        CancellationToken cancellationToken)
+    {
+        var connectionString = _configuration.GetConnectionString("TCNodeContext")
+            ?? _configuration["ConnectionStrings__TCNodeContext"]
+            ?? Environment.GetEnvironmentVariable("ConnectionStrings__TCNodeContext");
+        if (string.IsNullOrWhiteSpace(connectionString))
+            return Task.FromResult<IActionResult>(Problem(statusCode: StatusCodes.Status503ServiceUnavailable,
+                title: "The configured statutory source is unavailable."));
+        return Prepare(new(connectionString, request.PeriodStart, request.PeriodEnd, request.PeriodKey,
+            request.Finalised, request.VatRegistrationOverride), cancellationToken);
     }
 
     [HttpPost("prepare")]
