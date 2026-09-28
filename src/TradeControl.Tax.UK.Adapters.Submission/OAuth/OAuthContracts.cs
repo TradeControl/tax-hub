@@ -6,12 +6,22 @@ public static class HmrcOAuthScopes
 {
     public const string ReadVat = "read:vat";
     public const string WriteVat = "write:vat";
+    public const string VatReadWrite = ReadVat + " " + WriteVat;
 
     // Represented for prepared artifacts, but deliberately closed until Phase 5.15.
     public const string ReadSelfAssessment = "read:self-assessment";
     public const string WriteSelfAssessment = "write:self-assessment";
 
-    public static bool IsEnabled(string scope) => scope is ReadVat or WriteVat;
+    public static bool IsEnabled(string scope) => ParseEnabled(scope).Count > 0;
+
+    internal static IReadOnlySet<string> ParseEnabled(string scope)
+    {
+        var requested = (scope ?? string.Empty).Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal);
+        if (requested.Count == 0 || requested.Any(value => value is not ReadVat and not WriteVat))
+            return new HashSet<string>(StringComparer.Ordinal);
+        return requested;
+    }
 }
 
 public sealed record HmrcOAuthOptions(
@@ -28,12 +38,19 @@ public sealed record HmrcOAuthOptions(
 
     public void Validate()
     {
-        var approvedAppServiceCallback = RedirectUri.Scheme == Uri.UriSchemeHttps
-            && RedirectUri.AbsolutePath.Equals("/VatMTD", StringComparison.Ordinal)
+        var approvedProductCallback = RedirectUri.Scheme == Uri.UriSchemeHttps
+            && RedirectUri.AbsolutePath.Equals("/TaxHub/HmrcCallback", StringComparison.Ordinal)
             && string.IsNullOrEmpty(RedirectUri.Query)
             && string.IsNullOrEmpty(RedirectUri.Fragment)
-            && RedirectUri.Host.EndsWith(".azurewebsites.net", StringComparison.OrdinalIgnoreCase);
-        if (RedirectUri != LocalSandbox.RedirectUri && !approvedAppServiceCallback)
+            && (RedirectUri.IsLoopback
+                || RedirectUri.Host.EndsWith(".azurewebsites.net", StringComparison.OrdinalIgnoreCase));
+        var approvedDiagnosticCallback = RedirectUri == LocalSandbox.RedirectUri
+            || (RedirectUri.Scheme == Uri.UriSchemeHttps
+                && RedirectUri.AbsolutePath.Equals("/VatMTD", StringComparison.Ordinal)
+                && string.IsNullOrEmpty(RedirectUri.Query)
+                && string.IsNullOrEmpty(RedirectUri.Fragment)
+                && RedirectUri.Host.EndsWith(".azurewebsites.net", StringComparison.OrdinalIgnoreCase));
+        if (!approvedProductCallback && !approvedDiagnosticCallback)
             throw new InvalidOperationException("The OAuth callback is not the approved sandbox host entry point.");
         if (PendingAuthorisationLifetime <= TimeSpan.Zero || PendingAuthorisationLifetime > TimeSpan.FromMinutes(10))
             throw new InvalidOperationException("The pending authorisation lifetime is invalid.");

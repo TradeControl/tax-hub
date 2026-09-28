@@ -63,6 +63,32 @@ internal static class OAuthTests
             && !string.IsNullOrWhiteSpace(endpoint.LastCodeVerifier),
             "Code exchange did not retain the exact redirect and PKCE verifier binding.");
 
+        var combinedContext = Context("tenant-a", "principal-combined", "actor-combined");
+        endpoint.ExchangeResponse = Token("combined-access", "combined-refresh",
+            HmrcOAuthScopes.VatReadWrite, TimeSpan.FromHours(4));
+        var combinedStart = await service.BeginAuthorisationAsync(combinedContext, HmrcOAuthScopes.VatReadWrite);
+        Assert(HttpUtility.ParseQueryString(combinedStart.AuthorisationUri.Query)["scope"] == HmrcOAuthScopes.VatReadWrite,
+            "The product connection did not request the exact VAT read/write consent set.");
+        using (var completed = await service.CompleteCallbackAsync(combinedContext,
+            new(State(combinedStart), "combined-code")))
+            Assert(completed.Kind == OAuthAccessOutcomeKind.Available,
+                "The combined VAT consent did not create one principal grant.");
+        using (var readAccess = await service.GetAccessAsync(combinedContext, HmrcOAuthScopes.ReadVat))
+        using (var writeAccess = await service.GetAccessAsync(combinedContext, HmrcOAuthScopes.WriteVat))
+            Assert(readAccess.Kind == OAuthAccessOutcomeKind.Available
+                && writeAccess.Kind == OAuthAccessOutcomeKind.Available,
+                "The single VAT consent was not reusable for both read and write calls.");
+        assertions++;
+        try
+        {
+            _ = await service.BeginAuthorisationAsync(combinedContext, HmrcOAuthScopes.ReadSelfAssessment);
+            throw new InvalidOperationException("A closed scope was accepted by the VAT connection boundary.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("not enabled", StringComparison.Ordinal))
+        {
+            // Expected: a product caller cannot escalate beyond the enabled VAT scopes.
+        }
+
         using (var otherTenant = await service.GetAccessAsync(Context("tenant-b", "principal-a", "actor-b"),
             HmrcOAuthScopes.ReadVat))
             Assert(otherTenant.ReauthorisationReason == OAuthReauthorisationReason.MissingGrant,
@@ -144,7 +170,8 @@ internal static class OAuthTests
     private static AuthorityDispatchContext Context(string tenant, string principal, string actor) =>
         new(tenant, principal, actor, "approval", "sealed-facts");
     private static OAuthTokenResponse Token(string access, string refresh, string scope, TimeSpan lifetime) =>
-        new(access, refresh, lifetime, new HashSet<string>(StringComparer.Ordinal) { scope });
+        new(access, refresh, lifetime, scope.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.Ordinal));
     private static string State(OAuthAuthorisationStart start) =>
         HttpUtility.ParseQueryString(start.AuthorisationUri.Query)["state"]!;
 

@@ -82,10 +82,11 @@ public sealed class HmrcOAuthService : IDisposable
             throw new OAuthCallbackValidationException("The OAuth callback redirect binding is invalid.");
 
         var response = await ExchangeAsync(callback.Code, pending.CodeVerifier, cancellationToken);
+        var requestedScopes = HmrcOAuthScopes.ParseEnabled(pending.RequiredScope);
         var grantedScopes = response.Scopes.Count == 0
-            ? new HashSet<string>(StringComparer.Ordinal) { pending.RequiredScope }
+            ? new HashSet<string>(requestedScopes, StringComparer.Ordinal)
             : new HashSet<string>(response.Scopes, StringComparer.Ordinal);
-        if (!grantedScopes.Contains(pending.RequiredScope))
+        if (!requestedScopes.All(grantedScopes.Contains))
             return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.ScopeNotGranted);
         var now = _clock.GetUtcNow();
         if (response.AccessTokenLifetime <= _options.AccessTokenExpirySkew)

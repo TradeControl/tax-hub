@@ -116,13 +116,14 @@ internal sealed class FileOAuthGrantStore : IOAuthGrantStore
     public Task<StoredOAuthGrant?> GetGrantAsync(string tenantReference, string principalReference,
         string requiredScope, CancellationToken cancellationToken = default) => MutateAsync(document =>
         document.Grants.SingleOrDefault(item => item.TenantReference == tenantReference
-            && item.PrincipalReference == principalReference && item.RequiredScope == requiredScope), cancellationToken);
+            && item.PrincipalReference == principalReference && item.Scopes.Contains(requiredScope)), cancellationToken);
 
     public Task SaveGrantAsync(StoredOAuthGrant grant, CancellationToken cancellationToken = default) =>
         MutateAsync(document =>
         {
             document.Grants.RemoveAll(item => item.TenantReference == grant.TenantReference
-                && item.PrincipalReference == grant.PrincipalReference && item.RequiredScope == grant.RequiredScope);
+                && item.PrincipalReference == grant.PrincipalReference
+                && (grant.Scopes.Count > 1 || item.Scopes.Overlaps(grant.Scopes)));
             document.Grants.Add(grant);
             return 0;
         }, cancellationToken);
@@ -131,7 +132,7 @@ internal sealed class FileOAuthGrantStore : IOAuthGrantStore
         CancellationToken cancellationToken = default) => MutateAsync(document =>
         {
             var index = document.Grants.FindIndex(item => item.TenantReference == tenantReference
-                && item.PrincipalReference == principalReference && item.RequiredScope == requiredScope);
+                && item.PrincipalReference == principalReference && item.Scopes.Contains(requiredScope));
             if (index >= 0) document.Grants[index] = document.Grants[index] with { Revoked = true, AccessToken = "-", RefreshToken = "-" };
             return 0;
         }, cancellationToken);
@@ -139,7 +140,7 @@ internal sealed class FileOAuthGrantStore : IOAuthGrantStore
     public async Task<IAsyncDisposable> AcquireRefreshLeaseAsync(string tenantReference, string principalReference,
         string requiredScope, CancellationToken cancellationToken = default)
     {
-        var leaseId = Fingerprint($"{tenantReference}\n{principalReference}\n{requiredScope}");
+        var leaseId = Fingerprint($"{tenantReference}\n{principalReference}");
         var leasePath = $"{_path}.{leaseId}.refresh.lock";
         return await FileLease.AcquireAsync(leasePath, cancellationToken);
     }
