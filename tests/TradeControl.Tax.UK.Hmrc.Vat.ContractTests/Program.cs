@@ -12,6 +12,34 @@ Assert(VatReturnEndpoint.Path == "/organisations/vat/{vrn}/returns", "VAT return
 Assert(VatReturnEndpoint.Scope == "write:vat", "VAT return endpoint scope changed.");
 Assert(VatObligationsEndpoint.Method == "GET", "VAT obligations endpoint method changed.");
 
+const string sandboxObligationsJson = """
+    {
+      "obligations": [
+        {
+          "periodKey": "18A1",
+          "start": "2017-01-01",
+          "end": "2017-03-31",
+          "due": "2017-05-07",
+          "status": "F",
+          "received": "2017-05-06"
+        },
+        {
+          "periodKey": "18A2",
+          "start": "2017-04-01",
+          "end": "2017-06-30",
+          "due": "2017-08-07",
+          "status": "O"
+        }
+      ]
+    }
+    """;
+var sandboxObligations = JsonSerializer.Deserialize<VatObligationsResponse>(sandboxObligationsJson,
+    new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+Assert(sandboxObligations?.Obligations.Count == 2
+    && sandboxObligations.Obligations[0].PeriodKey == "18A1"
+    && sandboxObligations.Obligations[1].PeriodKey == "18A2",
+    "The HMRC VAT obligations response must not require a non-contract obligationId.");
+
 var request = new VatReturnRequest
 {
     Vrn = "123456789",

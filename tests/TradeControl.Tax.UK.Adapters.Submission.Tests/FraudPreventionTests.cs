@@ -158,6 +158,23 @@ internal static class FraudPreventionTests
                 "Missing vendor-license evidence was accepted by the strict submission formatter.");
         }
 
+        using (var sandboxReference = FraudHeaderService.CreateFileBackedSandboxReference(
+            Path.Combine(root, "sandbox-reference"), key, direct,
+            new FraudVendorConfiguration("product", new Dictionary<string, string> { ["app"] = "1.0" },
+                new Dictionary<string, string>()), clock: time))
+        {
+            var singleFactor = new BrowserFraudFacts("agent", Guid.NewGuid(), [],
+                [new(1920, 1080, 1m, 24)], "UTC+00:00",
+                new Dictionary<string, string> { ["user"] = "a" }, new(1000, 800));
+            var sandboxReferenceId = await sandboxReference.CaptureAndSealAsync(identity, singleFactor,
+                new TrustedIngressConnectionObservation(IPAddress.Parse("1.1.1.1"), 54321, time.GetUtcNow()));
+            var headers = await sandboxReference.BuildHeadersAsync(Dispatch(identity, sandboxReferenceId));
+            Assert(headers["Gov-Client-Multi-Factor"] == string.Empty
+                && headers["Gov-Vendor-License-IDs"] == string.Empty
+                && headers["Gov-Client-Public-IP"] == "1.1.1.1",
+                "The sandbox reference formatter did not retain public topology while permitting reviewed warnings.");
+        }
+
         var diagnosticTopology = FraudDeploymentTopology.SandboxValidatorDiagnosticDirect(
             "localhost-validator-observation", IPAddress.IPv6Loopback);
         var diagnosticVendor = new FraudVendorConfiguration("Trade Control Tax Hub",

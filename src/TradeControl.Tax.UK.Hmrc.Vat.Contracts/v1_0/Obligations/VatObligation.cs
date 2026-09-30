@@ -2,7 +2,6 @@
 
 public class VatObligation
 {
-    public required string ObligationId { get; set; }
     public required string PeriodKey { get; set; }
     public DateTime Start { get; set; }
     public DateTime End { get; set; }

@@ -67,6 +67,22 @@ public sealed class FraudHeaderService : IDisposable
             sandboxValidatorDiagnostic: true);
     }
 
+    public static FraudHeaderService CreateFileBackedSandboxReference(string protectedRoot,
+        ReadOnlySpan<byte> encryptionKey, FraudDeploymentTopology topology, FraudVendorConfiguration vendor,
+        FraudHeaderOptions? options = null, TimeProvider? clock = null)
+    {
+        if (topology.AllowsNonPublicDiagnosticAddresses)
+            throw new ArgumentException("A sandbox reference host requires a public deployment topology.",
+                nameof(topology));
+        var selectedOptions = options ?? FraudHeaderOptions.Default;
+        selectedOptions.Validate();
+        var selectedClock = clock ?? TimeProvider.System;
+        return new(topology, vendor, selectedOptions,
+            new EncryptedFileFraudContextStore(protectedRoot, encryptionKey,
+                selectedOptions.EvidenceRetention, selectedClock), selectedClock,
+            sandboxValidatorDiagnostic: true);
+    }
+
     public async Task<SealedFraudContextReference> CaptureAndSealAsync(FraudActorIdentity identity,
         BrowserFraudFacts browserFacts, TrustedIngressConnectionObservation ingress,
         CancellationToken cancellationToken = default)
