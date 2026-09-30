@@ -102,8 +102,7 @@ if (connectionFileIndex >= 0 || connectionEnvironmentIndex >= 0)
     await using (var command = new SqlCommand("""
         SELECT TOP (1)
                CONVERT(date, due.PayFrom),
-               CONVERT(date, DATEADD(day, -1, due.PayTo)),
-               CONVERT(date, submission.VatEndOn)
+               CONVERT(date, DATEADD(day, -1, due.PayTo))
         FROM Cash.vwTaxVatSubmission submission
         JOIN Cash.fnTaxTypeDueDates(1, 0) due ON submission.StartOn = due.PayTo
         ORDER BY submission.StartOn DESC
@@ -114,19 +113,16 @@ if (connectionFileIndex >= 0 || connectionEnvironmentIndex >= 0)
         {
             var livePeriod = new TaxReportingPeriod(DateOnly.FromDateTime(reader.GetDateTime(0)),
                 DateOnly.FromDateTime(reader.GetDateTime(1)), TaxPeriodKind.Vat, "sandbox-vat");
-            var selectionPeriod = new TaxReportingPeriod(
-                new DateOnly(reader.GetDateTime(2).Year, reader.GetDateTime(2).Month, 1),
-                DateOnly.FromDateTime(reader.GetDateTime(2)), TaxPeriodKind.Vat, "sandbox-vat");
             Console.WriteLine($"Sandbox VAT period: {livePeriod.Start:yyyy-MM-dd} to {livePeriod.End:yyyy-MM-dd}.");
             asOfDate = livePeriod.End;
-            var liveVat = await adapter.ReadAsync(new VatReturnSelector(liveKey, selectionPeriod));
+            var liveVat = await adapter.ReadAsync(new VatReturnSelector(liveKey, livePeriod));
             Assert(liveVat.Period == livePeriod && liveVat.Provenance.Facts.Count == 10,
                 "The sandbox VAT projection did not cross the neutral adapter intact.");
-            var alternateStart = new TaxReportingPeriod(selectionPeriod.Start.AddDays(-1), selectionPeriod.End,
-                TaxPeriodKind.Vat, selectionPeriod.StableKey);
+            var alternateStart = new TaxReportingPeriod(livePeriod.Start.AddDays(-1), livePeriod.End,
+                TaxPeriodKind.Vat, livePeriod.StableKey);
             var endSelectedVat = await adapter.ReadAsync(new VatReturnSelector(liveKey, alternateStart));
             Assert(endSelectedVat.Period == livePeriod,
-                "VAT selection incorrectly depended on StartOn instead of VatEndOn.");
+                "VAT selection incorrectly depended on the supplied start instead of the accounting-period end.");
             var readiness = await adapter.EvaluateAsync(new SourceReadinessRequest(liveKey, liveVat.Subject, livePeriod));
             Assert(readiness.Findings.All(item => !string.IsNullOrWhiteSpace(item.Code)),
                 "The sandbox readiness projection returned an unstructured finding.");

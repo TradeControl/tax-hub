@@ -1,4 +1,7 @@
 using System.Data;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.Data.SqlClient;
 using TradeControl.Tax.Data;
 using TradeControl.Tax.UK.Adapters.TradeControl.Readers;
@@ -19,7 +22,6 @@ public sealed class TradeControlTaxSourceAdapter : IVatReturnSourceReader, IBusi
     public async Task<VatReturnSource> ReadAsync(VatReturnSelector selector, CancellationToken cancellationToken = default)
     {
         var connectionString = _sources.Resolve(selector.Source);
-        var versionBefore = await ReadDatabaseVersionAsync(connectionString, cancellationToken);
         var context = await new TcStatutoryContextReader(_connections, connectionString)
             .ReadAsync(selector.Period.End, cancellationToken);
         const string sql = """
@@ -28,12 +30,11 @@ SELECT CONVERT(date, due.PayFrom) AS PeriodStart,
        submission.vatDueSales, submission.vatDueAcquisitions, submission.vatAdjustment,
        submission.totalVatDue, submission.vatReclaimedCurrPeriod, submission.netVatDue,
        submission.totalValueSalesExVAT, submission.totalValuePurchasesExVAT,
-       submission.totalValueGoodsSuppliedExVAT, submission.totalValueGoodsReceivedExVAT,
-       CONVERT(varchar(18), @@DBTS, 1) AS SnapshotToken
+       submission.totalValueGoodsSuppliedExVAT, submission.totalValueGoodsReceivedExVAT
 FROM Cash.vwTaxVatSubmission submission
 JOIN Cash.fnTaxTypeDueDates(1, 0) due
   ON submission.StartOn = due.PayTo
-WHERE CONVERT(date, submission.VatEndOn) = @VatEndOn;
+WHERE CONVERT(date, DATEADD(day, -1, due.PayTo)) = @VatEndOn;
 """;
         using var connection = _connections.Create(connectionString);
         await SqlHelpers.EnsureOpenAsync(connection, cancellationToken);
@@ -48,10 +49,8 @@ WHERE CONVERT(date, submission.VatEndOn) = @VatEndOn;
             Decimal(reader, "vatReclaimedCurrPeriod"), Decimal(reader, "netVatDue"), Decimal(reader, "totalValueSalesExVAT"),
             Decimal(reader, "totalValuePurchasesExVAT"), Decimal(reader, "totalValueGoodsSuppliedExVAT"),
             Decimal(reader, "totalValueGoodsReceivedExVAT"));
-        var token = Convert.ToString(reader["SnapshotToken"]) ?? throw new InvalidOperationException("VAT snapshot token is missing.");
         if (await reader.ReadAsync(cancellationToken)) throw new InvalidOperationException("The VAT period returned duplicate rows.");
-        if (!versionBefore.Equals(token, StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException("The Trade Control source changed while the VAT snapshot was being read.");
+        var token = VatSnapshotToken(row);
         var resolvedPeriod = new TaxReportingPeriod(row.PeriodStart, row.PeriodEnd,
             TaxPeriodKind.Vat, selector.Period.StableKey);
         return TradeControlSourceMapper.Vat(TradeControlSourceMapper.Subject(context), resolvedPeriod, row, token);
@@ -151,5 +150,19 @@ WHERE @TaxSourceCode IS NOT NULL AND IsError = 1;
         using var command = new SqlCommand("SELECT CONVERT(varchar(18), @@DBTS, 1);", connection);
         return Convert.ToString(await command.ExecuteScalarAsync(cancellationToken))
             ?? throw new InvalidOperationException("The Trade Control source version could not be read.");
+    }
+
+    internal static string VatSnapshotToken(TcVatProjectionRow row)
+    {
+        ArgumentNullException.ThrowIfNull(row);
+        static string DecimalValue(decimal value) => value.ToString("0.00000", CultureInfo.InvariantCulture);
+        var canonical = string.Join('|', row.PeriodStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            row.PeriodEnd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            DecimalValue(row.VatDueSales), DecimalValue(row.VatDueAcquisitions),
+            DecimalValue(row.VatAdjustment), DecimalValue(row.TotalVatDue),
+            DecimalValue(row.VatReclaimedCurrentPeriod), DecimalValue(row.NetVatDue),
+            DecimalValue(row.TotalValueSalesExVat), DecimalValue(row.TotalValuePurchasesExVat),
+            DecimalValue(row.TotalValueGoodsSuppliedExVat), DecimalValue(row.TotalAcquisitionsExVat));
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 }

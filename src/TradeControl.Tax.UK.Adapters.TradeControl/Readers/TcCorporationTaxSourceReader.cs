@@ -50,8 +50,8 @@ public sealed class TcCorporationTaxSourceReader : ICorporationTaxSource
                 period.Start.ToDateTime(TimeOnly.MinValue), exclusiveEnd, cancellationToken);
             Require(accounts.ValidationStatus == TcTaxValidationStatus.Ready, "The accounts projection is not ready for Corporation Tax.");
             Require(tax.ValidationStatus == TcTaxValidationStatus.Ready, "The Corporation Tax projection is not ready.");
-            Require(computation.IsUniformTaxRate && computation.BusinessTaxRate is not null,
-                "The Corporation Tax period contains more than one business-tax rate and requires an apportioned computation.");
+            Require(computation.BusinessTaxRate is not null,
+                "The Corporation Tax period does not have a configured effective business-tax rate.");
             var businessTaxRate = computation.BusinessTaxRate
                 ?? throw new InvalidOperationException("The Corporation Tax rate is missing.");
             Require(computation.CalculatedTaxDue == computation.StatementTaxDue,
