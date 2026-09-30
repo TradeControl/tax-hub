@@ -185,6 +185,20 @@ public sealed class PreparedApiRequest
     public bool HasBody => BodyBytes.HasValue;
     public bool HasErrors => Findings.Any(finding => finding.Severity == PreparedFindingSeverity.Error);
 
+    public PreparedApiRequest WithVerifiedBody(ReadOnlySpan<byte> exactBody)
+    {
+        if (!HasBody || string.IsNullOrWhiteSpace(BodySha256) || exactBody.Length == 0)
+            throw new InvalidOperationException("Only a body-bearing prepared request can restore exact bytes.");
+        var actual = SHA256.HashData(exactBody);
+        var expected = Convert.FromHexString(BodySha256);
+        if (!CryptographicOperations.FixedTimeEquals(actual, expected))
+            throw new InvalidOperationException("The retained prepared body does not match its approved digest.");
+        return new(OperationId, ContractFamily, ContractVersion, IsPreview, Eligibility, Method,
+            RelativePath, Query, Headers, ContentType, exactBody.ToArray(), RequiredOAuthScope,
+            ExpectedSuccessStatusCode, ResponseBodyExpectation, ExpectedResponseType,
+            SourceEvidence, Findings);
+    }
+
     private static void Require(string value, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value))

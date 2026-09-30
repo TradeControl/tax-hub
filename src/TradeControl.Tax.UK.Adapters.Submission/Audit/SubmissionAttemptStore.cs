@@ -64,6 +64,7 @@ public sealed record SubmissionAttemptRecord(
     public bool IsWrite => Method is not "GET" and not "HEAD";
     public bool IsActive => State is SubmissionAttemptState.Reserved
         or SubmissionAttemptState.Sending or SubmissionAttemptState.Unknown;
+    public bool BlocksReplay => IsActive || State == SubmissionAttemptState.Succeeded;
 }
 
 public sealed record SubmissionAttemptStoreOptions(
@@ -126,7 +127,7 @@ public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
             Prune(records);
             var method = reservation.Method.Trim().ToUpperInvariant();
             var isWrite = method is not "GET" and not "HEAD";
-            var active = isWrite ? records.FirstOrDefault(item => item.IsWrite && item.IsActive
+            var active = isWrite ? records.FirstOrDefault(item => item.IsWrite && item.BlocksReplay
                 && item.TenantReference == reservation.TenantReference
                 && item.LogicalSubmissionReference == reservation.LogicalSubmissionReference) : null;
             if (active is not null) throw new ActiveSubmissionAttemptException(active.AttemptReference);

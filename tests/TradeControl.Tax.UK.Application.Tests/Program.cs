@@ -166,6 +166,19 @@ var vatPrepared = await new VatReturnPreparer(new VatReader(vat), new Readiness(
 Assert(!vatPrepared.HasErrors && vatPrepared.HasBody
     && vatPrepared.RelativePath == "/organisations/vat/123456789/returns",
     "The VAT fixture did not pass through the complete offline preparation pipeline.");
+var retainedVatBytes = vatPrepared.BodyBytes!.Value.ToArray();
+var restoredVat = vatPrepared.WithVerifiedBody(retainedVatBytes);
+Assert(!ReferenceEquals(restoredVat, vatPrepared)
+    && restoredVat.BodySha256 == vatPrepared.BodySha256
+    && restoredVat.BodyBytes!.Value.AsSpan().SequenceEqual(retainedVatBytes),
+    "A retained exact VAT body could not be restored across the approval/submit request boundary.");
+try
+{
+    retainedVatBytes[0] ^= 1;
+    _ = vatPrepared.WithVerifiedBody(retainedVatBytes);
+    Assert(false, "Changed retained VAT bytes were accepted for dispatch.");
+}
+catch (InvalidOperationException) { Assert(true, "Changed retained VAT bytes fail closed."); }
 var authorityVat = Encoding.UTF8.GetBytes("""
     {"periodKey":"26A1","vatDueSales":0,"vatDueAcquisitions":125.25,"totalVatDue":125.25,"vatReclaimedCurrPeriod":25.25,"netVatDue":100,"totalValueSalesExVAT":1000,"totalValuePurchasesExVAT":500,"totalValueGoodsSuppliedExVAT":0,"totalAcquisitionsExVAT":0}
     """);

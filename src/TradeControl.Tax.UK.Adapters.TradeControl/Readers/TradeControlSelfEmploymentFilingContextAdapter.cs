@@ -25,10 +25,10 @@ SELECT RegistrationValue, CONVERT(varchar(18), RowVer, 1) AS RowVersion, IsRevie
 FROM Subject.fnRegistration(@SubjectCode, N'GB-NI', @AsOfDate);
 
 SELECT ReportingProfileCode, AuthorityReference, CONVERT(varchar(18), RowVer, 1) AS RowVersion, IsReviewed
-FROM Cash.fnReportingProfile(@SubjectCode, N'SELF-EMPLOYMENT', @TaxSourceCode, @AsOfDate);
+FROM Cash.fnReportingProfile(@SubjectCode, 1, @TaxSourceCode, @AsOfDate);
 
 SELECT setting.SettingCode, setting.DisplayValue, setting.RowVersion, setting.IsReviewed
-FROM Cash.fnReportingProfile(@SubjectCode, N'SELF-EMPLOYMENT', @TaxSourceCode, @AsOfDate) profile
+FROM Cash.fnReportingProfile(@SubjectCode, 1, @TaxSourceCode, @AsOfDate) profile
 CROSS APPLY
 (
     SELECT N'ACCOUNTING-BASIS' AS SettingCode, TextValue AS DisplayValue,

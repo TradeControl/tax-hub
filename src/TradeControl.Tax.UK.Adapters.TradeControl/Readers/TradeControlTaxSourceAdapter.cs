@@ -115,8 +115,8 @@ WHERE @TaxSourceCode IS NOT NULL AND IsError = 1;
         await SqlHelpers.EnsureOpenAsync(connection, cancellationToken);
         using var command = new SqlCommand(sql, connection);
         command.Parameters.Add("@SubjectCode", SqlDbType.NVarChar, 50).Value = request.Subject.SubjectCode;
-        command.Parameters.Add("@ReportingTypeCode", SqlDbType.NVarChar, 20).Value =
-            request.Period.Kind == TaxPeriodKind.Vat ? "INDIRECT-TAX" : "SELF-EMPLOYMENT";
+        command.Parameters.Add("@ReportingTypeCode", SqlDbType.SmallInt).Value =
+            request.Period.Kind == TaxPeriodKind.Vat ? (short)0 : (short)1;
         command.Parameters.Add("@TaxSourceCode", SqlDbType.NVarChar, 20).Value =
             request.TaxSourceCode is { } source ? source.Value : DBNull.Value;
         command.Parameters.Add("@AsOfDate", SqlDbType.Date).Value = request.Period.End.ToDateTime(TimeOnly.MinValue);

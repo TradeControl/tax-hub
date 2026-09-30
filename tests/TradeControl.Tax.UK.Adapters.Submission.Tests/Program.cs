@@ -125,6 +125,11 @@ try
         new(SubmissionAttemptState.Succeeded, "ACCEPTED", 201, "correlation-a", "response/0001"));
     Assert(!reconciled.IsActive && reconciled.State == SubmissionAttemptState.Succeeded,
         "An unknown attempt could not be reconciled to a terminal outcome.");
+    Assert(reconciled.BlocksReplay,
+        "An accepted write no longer blocks replay for the same tenant and logical submission.");
+    await AssertRejectedAsync(() => restarted.ReserveAsync(reservation with
+        { PrincipalReference = "principal-b" }),
+        "An accepted write allowed replay under a different principal in the same tenant.");
     await AssertRejectedAsync(() => restarted.RecordOutcomeAsync("tenant-a", "principal-a",
         reserved.AttemptReference, new(SubmissionAttemptState.Failed, "LATE-MUTATION")),
         "A terminal attempt outcome was mutated.");
