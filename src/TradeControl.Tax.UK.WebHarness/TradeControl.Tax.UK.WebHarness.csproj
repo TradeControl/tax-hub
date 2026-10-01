@@ -17,6 +17,7 @@
     <ProjectReference Include="..\TradeControl.Tax.UK.Company.Contracts\TradeControl.Tax.UK.Company.Contracts.csproj" />
     <ProjectReference Include="..\TradeControl.Tax.UK.Adapters.TradeControl\TradeControl.Tax.UK.Adapters.TradeControl.csproj" />
     <ProjectReference Include="..\TradeControl.Tax.UK.Adapters.Submission\TradeControl.Tax.UK.Adapters.Submission.csproj" />
+    <ProjectReference Include="..\TradeControl.Tax.UK.Hmrc.Vat.Contracts\TradeControl.Tax.UK.Hmrc.Vat.Contracts.csproj" />
   </ItemGroup>
 
   <ItemGroup>

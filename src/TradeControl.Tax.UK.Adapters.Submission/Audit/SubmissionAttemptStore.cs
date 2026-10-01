@@ -40,6 +40,15 @@ public sealed record SubmissionReceiptEvidence(
     string? FormBundleNumber,
     string? ChargeReference);
 
+public sealed record SubmissionReconciliationDifference(
+    string Field, string ApprovedValue, string AuthorityValue);
+
+public sealed record SubmissionReconciliationEvidence(
+    bool Matches,
+    DateTimeOffset CheckedAt,
+    string OutcomeCode,
+    IReadOnlyList<SubmissionReconciliationDifference> Differences);
+
 public sealed record SubmissionAttemptRecord(
     string AttemptReference,
     string LogicalSubmissionReference,
@@ -59,7 +68,8 @@ public sealed record SubmissionAttemptRecord(
     string? CorrelationReference = null,
     string? SafeResponseReference = null,
     string? SafePayloadReference = null,
-    SubmissionReceiptEvidence? Receipt = null)
+    SubmissionReceiptEvidence? Receipt = null,
+    SubmissionReconciliationEvidence? Reconciliation = null)
 {
     public bool IsWrite => Method is not "GET" and not "HEAD";
     public bool IsActive => State is SubmissionAttemptState.Reserved
@@ -88,10 +98,17 @@ public interface ISubmissionAttemptStore
         CancellationToken cancellationToken = default);
     Task<SubmissionAttemptRecord?> GetAsync(string tenantReference, string principalReference,
         string attemptReference, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SubmissionAttemptRecord>> ListAsync(string tenantReference, string principalReference,
+        int maximumRecords = 100, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<SubmissionAttemptRecord>> ListTenantAsync(string tenantReference,
+        int maximumRecords = 100, CancellationToken cancellationToken = default);
     Task<SubmissionAttemptRecord> RecordPayloadAsync(string tenantReference, string principalReference,
         string attemptReference, string safePayloadReference, CancellationToken cancellationToken = default);
     Task<SubmissionAttemptRecord> RecordOutcomeAsync(string tenantReference, string principalReference,
         string attemptReference, SubmissionAttemptOutcome outcome, CancellationToken cancellationToken = default);
+    Task<SubmissionAttemptRecord> RecordReconciliationAsync(string tenantReference, string principalReference,
+        string attemptReference, SubmissionReconciliationEvidence reconciliation,
+        CancellationToken cancellationToken = default);
 }
 
 public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
@@ -180,6 +197,48 @@ public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
         }
     }
 
+    public async Task<IReadOnlyList<SubmissionAttemptRecord>> ListAsync(string tenantReference,
+        string principalReference, int maximumRecords = 100, CancellationToken cancellationToken = default)
+    {
+        ValidateReference(tenantReference, nameof(tenantReference));
+        ValidateReference(principalReference, nameof(principalReference));
+        if (maximumRecords is < 1 or > 500)
+            throw new ArgumentOutOfRangeException(nameof(maximumRecords),
+                "The history page size must be between 1 and 500 records.");
+        await _fileLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var processLock = await AcquireProcessLockAsync(cancellationToken);
+            var records = await ReadAsync(cancellationToken);
+            return records.Where(item => item.TenantReference == tenantReference
+                    && item.PrincipalReference == principalReference)
+                .OrderByDescending(item => item.UpdatedAt)
+                .Take(maximumRecords)
+                .ToArray();
+        }
+        finally { _fileLock.Release(); }
+    }
+
+    public async Task<IReadOnlyList<SubmissionAttemptRecord>> ListTenantAsync(string tenantReference,
+        int maximumRecords = 100, CancellationToken cancellationToken = default)
+    {
+        ValidateReference(tenantReference, nameof(tenantReference));
+        if (maximumRecords is < 1 or > 500)
+            throw new ArgumentOutOfRangeException(nameof(maximumRecords),
+                "The history page size must be between 1 and 500 records.");
+        await _fileLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var processLock = await AcquireProcessLockAsync(cancellationToken);
+            var records = await ReadAsync(cancellationToken);
+            return records.Where(item => item.TenantReference == tenantReference)
+                .OrderByDescending(item => item.UpdatedAt)
+                .Take(maximumRecords)
+                .ToArray();
+        }
+        finally { _fileLock.Release(); }
+    }
+
     public async Task<SubmissionAttemptRecord> RecordPayloadAsync(string tenantReference,
         string principalReference, string attemptReference, string safePayloadReference,
         CancellationToken cancellationToken = default)
@@ -248,6 +307,48 @@ public sealed class FileSubmissionAttemptStore : ISubmissionAttemptStore
         {
             _fileLock.Release();
         }
+    }
+
+    public async Task<SubmissionAttemptRecord> RecordReconciliationAsync(string tenantReference,
+        string principalReference, string attemptReference, SubmissionReconciliationEvidence reconciliation,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reconciliation);
+        ValidateReference(tenantReference, nameof(tenantReference));
+        ValidateReference(principalReference, nameof(principalReference));
+        ValidateReference(attemptReference, nameof(attemptReference));
+        ValidateReference(reconciliation.OutcomeCode, nameof(reconciliation.OutcomeCode));
+        if (reconciliation.Differences is null || reconciliation.Differences.Count > 64
+            || reconciliation.Differences.Any(item => string.IsNullOrWhiteSpace(item.Field)
+                || item.Field.Length > 128 || item.ApprovedValue.Length > 128
+                || item.AuthorityValue.Length > 128))
+            throw new ArgumentException("The reconciliation evidence is invalid.", nameof(reconciliation));
+        if (reconciliation.Matches != (reconciliation.Differences.Count == 0))
+            throw new ArgumentException("The reconciliation result and differences disagree.", nameof(reconciliation));
+        await _fileLock.WaitAsync(cancellationToken);
+        try
+        {
+            await using var processLock = await AcquireProcessLockAsync(cancellationToken);
+            var records = await ReadAsync(cancellationToken);
+            var index = records.FindIndex(item => item.AttemptReference == attemptReference
+                && item.TenantReference == tenantReference && item.PrincipalReference == principalReference);
+            if (index < 0) throw new KeyNotFoundException("No attempt exists for the supplied tenant and principal.");
+            var current = records[index];
+            if (!current.IsWrite || current.State is SubmissionAttemptState.Reserved
+                or SubmissionAttemptState.Sending or SubmissionAttemptState.Failed
+                or SubmissionAttemptState.Rejected)
+                throw new InvalidOperationException("Only a successful or unknown write can retain reconciliation evidence.");
+            if (current.Reconciliation is not null)
+            {
+                if (current.Reconciliation == reconciliation) return current;
+                throw new InvalidOperationException("Reconciliation evidence is immutable once recorded.");
+            }
+            var updated = current with { Reconciliation = reconciliation, UpdatedAt = _timeProvider.GetUtcNow() };
+            records[index] = updated;
+            await WriteAsync(records, cancellationToken);
+            return updated;
+        }
+        finally { _fileLock.Release(); }
     }
 
     private async Task<List<SubmissionAttemptRecord>> ReadAsync(CancellationToken cancellationToken)

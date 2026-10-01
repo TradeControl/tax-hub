@@ -106,6 +106,16 @@ try
     Assert(await restarted.GetAsync("tenant-b", "principal-a", reserved.AttemptReference) is null
         && await restarted.GetAsync("tenant-a", "principal-b", reserved.AttemptReference) is null,
         "Attempt retrieval crossed a tenant or principal boundary.");
+    var tenantAHistory = await restarted.ListAsync("tenant-a", "principal-a");
+    Assert(tenantAHistory.Count == 1 && tenantAHistory[0].AttemptReference == reserved.AttemptReference
+        && (await restarted.ListAsync("tenant-a", "principal-b")).Count == 0,
+        "Attempt history crossed a principal boundary or omitted the scoped attempt.");
+    var tenantHistory = await restarted.ListTenantAsync("tenant-a");
+    Assert(tenantHistory.Count == 1 && tenantHistory.All(item => item.TenantReference == "tenant-a")
+        && (await restarted.ListTenantAsync("tenant-c")).Count == 0,
+        "Privileged tenant history crossed a tenant boundary.");
+    await AssertRejectedAsync(() => restarted.ListAsync("tenant-a", "principal-a", 501),
+        "An unbounded history page was accepted.");
 
     var unknown = await restarted.RecordOutcomeAsync("tenant-a", "principal-a", reserved.AttemptReference,
         new(SubmissionAttemptState.Unknown, "NETWORK-OUTCOME-UNKNOWN", CorrelationReference: "correlation-a",
@@ -127,6 +137,18 @@ try
         "An unknown attempt could not be reconciled to a terminal outcome.");
     Assert(reconciled.BlocksReplay,
         "An accepted write no longer blocks replay for the same tenant and logical submission.");
+    var reconciliation = new SubmissionReconciliationEvidence(true, DateTimeOffset.UtcNow,
+        "HMRC-SUCCESS", []);
+    var withReconciliation = await restarted.RecordReconciliationAsync("tenant-a", "principal-a",
+        reserved.AttemptReference, reconciliation);
+    Assert(withReconciliation.Reconciliation == reconciliation,
+        "Exact readback reconciliation was not retained on the durable write attempt.");
+    await AssertRejectedAsync(() => restarted.RecordReconciliationAsync("tenant-a", "principal-b",
+        reserved.AttemptReference, reconciliation),
+        "Reconciliation crossed the attempt principal boundary.");
+    await AssertRejectedAsync(() => restarted.RecordReconciliationAsync("tenant-a", "principal-a",
+        reserved.AttemptReference, reconciliation with { Matches = false }),
+        "Contradictory or mutable reconciliation evidence was accepted.");
     await AssertRejectedAsync(() => restarted.ReserveAsync(reservation with
         { PrincipalReference = "principal-b" }),
         "An accepted write allowed replay under a different principal in the same tenant.");
