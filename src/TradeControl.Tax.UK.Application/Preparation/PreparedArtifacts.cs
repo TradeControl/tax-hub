@@ -7,7 +7,8 @@ namespace TradeControl.Tax.UK.Application.Preparation;
 public enum PreparedArtifactStatus
 {
     Preview,
-    SubmissionReady
+    SubmissionReady,
+    Unsupported
 }
 
 public enum PreparedFindingSeverity
@@ -209,7 +210,8 @@ public sealed class PreparedApiRequest
 public enum SubmissionPollingMode
 {
     None,
-    PollUntilTerminal
+    PollUntilTerminal,
+    TransactionEngine
 }
 
 public sealed record PreparedPollingSemantics(
@@ -333,7 +335,7 @@ public abstract class PreparedApiRequestGateway : IPreparedApiRequestGateway
         AuthorityDispatchContext context, CancellationToken cancellationToken);
 }
 
-public interface IPreparedSubmissionPackageGateway
+public interface ICompaniesHouseSubmissionPackageGateway
 {
     Task SendAsync(PreparedSubmissionPackage package, CancellationToken cancellationToken = default);
 }

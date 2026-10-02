@@ -25,5 +25,5 @@ public static class CorporationTaxEndpointSet
 {
     public static SubmissionServiceDescriptor Submit { get; } = new(
         "HMRC", "SubmitCorporationTaxReturn", "Transaction Engine XML", "application/xml", "application/xml",
-        "GovernmentGateway", "CT600-V3-2026-RIM-1.994", ContractStatus.Production, false);
+        "GovernmentGateway", "CT600-V3-2026-RIM-1.994", ContractStatus.Production, true);
 }

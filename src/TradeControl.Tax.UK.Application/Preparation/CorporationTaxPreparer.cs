@@ -75,7 +75,7 @@ public sealed class CorporationTaxPreparer
                     new(accounts.FileName, preparedAccounts),
                     new(computationDocument.FileName, computationArtifact)
                 ],
-                new(SubmissionPollingMode.None)));
+                new(SubmissionPollingMode.TransactionEngine)));
     }
 
     private static IEnumerable<PreparedArtifactFinding> Findings(IEnumerable<ValidationFinding> findings) =>

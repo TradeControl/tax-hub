@@ -196,6 +196,30 @@ Assert(!mismatchedVat.Matches && mismatchedVat.Differences.Single()
     "A changed HMRC VAT box was not reported as an explicit reconciliation difference.");
 var gateway = new CapturingGateway();
 var dispatchContext = new AuthorityDispatchContext("tenant-01", "principal-01", "actor-01", "approval-01", "facts-01");
+var pendingCt = CorporationTaxSubmissionOutcome.Pending("ct-correlation-01");
+var acceptedCt = CorporationTaxSubmissionOutcome.Accepted("receipts/ct-01", "ct-correlation-01",
+    new(CorporationTaxDeletionState.Pending));
+var rejectedCt = CorporationTaxSubmissionOutcome.Rejected(
+    [new("CT-BUSINESS-RULE", "The return was rejected.", "CT600")], "ct-correlation-01",
+    new(CorporationTaxDeletionState.Acknowledged, "deletions/ct-01"));
+var unknownCt = CorporationTaxSubmissionOutcome.RecoveryRequired("ct-correlation-01");
+Assert(pendingCt.State == CorporationTaxConversationState.Pending
+    && pendingCt.CorrelationReference == "ct-correlation-01"
+    && acceptedCt.State == CorporationTaxConversationState.Accepted
+    && acceptedCt.SafeReceiptReference == "receipts/ct-01"
+    && acceptedCt.Deletion.State == CorporationTaxDeletionState.Pending
+    && rejectedCt.State == CorporationTaxConversationState.Rejected
+    && rejectedCt.Errors.Single().Code == "CT-BUSINESS-RULE"
+    && rejectedCt.Deletion.State == CorporationTaxDeletionState.Acknowledged
+    && unknownCt.State == CorporationTaxConversationState.RecoveryRequired
+    && unknownCt.Deletion.State == CorporationTaxDeletionState.Unknown,
+    "The Corporation Tax port outcome does not distinguish pending, terminal, recovery and deletion states.");
+AssertRejected(() => CorporationTaxSubmissionOutcome.Pending("https://authority.example/correlation"),
+    "A raw authority URL was accepted as a safe Corporation Tax correlation reference.");
+AssertRejected(() => CorporationTaxSubmissionOutcome.Accepted(""),
+    "Corporation Tax acceptance without safe receipt evidence was accepted.");
+AssertRejected(() => CorporationTaxSubmissionOutcome.Rejected([]),
+    "Corporation Tax rejection without bounded business errors was accepted.");
 foreach (var prepared in new[] { vatPrepared, cumulativePrepared, standardPrepared })
 {
     var outcome = await gateway.SendAsync(prepared, dispatchContext);

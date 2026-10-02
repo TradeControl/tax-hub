@@ -76,6 +76,9 @@ Assert(ctDocument.Root?.Name.LocalName == "IRenvelope", "Corporation Tax root is
 Assert(ctDocument.Root?.Name.NamespaceName == Ct600Contract.Namespace, "Corporation Tax namespace changed.");
 Assert(ctDocument.Descendants().Any(x => x.Name.LocalName == "CT600A"), "CT600A is absent from the package.");
 Assert(CorporationTaxEndpointSet.Submit.ContractVersion.Contains("1.994", StringComparison.Ordinal), "CT600 endpoint metadata is not pinned to RIM 1.994.");
+Assert(CorporationTaxEndpointSet.Submit.Protocol == "Transaction Engine XML"
+    && CorporationTaxEndpointSet.Submit.RequiresStatusPolling,
+    "Corporation Tax submission must expose its Transaction Engine XML conversation semantics.");
 Assert(typeof(IRenvelope).GetCustomAttributes(false).Any(), "Official generated CT600 wire family is absent.");
 
 var brokenResult = validator.Validate(ctPackage with { Return = ct600 with { TaxPayable = 1m } });
