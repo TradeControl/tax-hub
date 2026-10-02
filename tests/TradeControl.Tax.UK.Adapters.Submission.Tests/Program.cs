@@ -2,6 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using TradeControl.Tax.UK.Adapters.Submission.Audit;
 using TradeControl.Tax.UK.Adapters.Submission.Configuration;
+using TradeControl.Tax.UK.Adapters.Submission.FraudPrevention;
 using TradeControl.Tax.UK.Adapters.Submission.OAuth;
 using TradeControl.Tax.UK.Application.Preparation;
 
@@ -40,6 +41,29 @@ Assert(typeof(EnvironmentSelector).GetMethods(BindingFlags.Public | BindingFlags
 Assert(typeof(HmrcOAuthTokenEndpoint).GetConstructors().All(constructor => constructor.GetParameters()
         .All(parameter => parameter.ParameterType != typeof(HttpClient))),
     "Public composition can inject an auto-redirecting OAuth HTTP client.");
+
+var validatorHandler = new RecordingHandler(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+{
+    Content = new StringContent("{\"specVersion\":\"3.3\",\"code\":\"VALID_HEADERS\"}")
+});
+using (var validatorClient = new HttpClient(validatorHandler))
+using (var validator = new HmrcFraudPreventionValidator(validatorClient, sandbox))
+using (var accessToken = new ProtectedSecret("validator-access-token"))
+{
+    var validatorHeaders = new FraudPreventionHeaders(new Dictionary<string, string>
+    {
+        ["Gov-Client-Connection-Method"] = "WEB_APP_VIA_SERVER",
+        ["Gov-Vendor-Product-Name"] = "Trade%20Control"
+    });
+    var validation = await validator.ValidateAsync(validatorHeaders, accessToken);
+    Assert(validation.StatusCode == 200
+        && validation.Body.SequenceEqual("{\"specVersion\":\"3.3\",\"code\":\"VALID_HEADERS\"}"u8.ToArray())
+        && validatorHandler.Request?.RequestUri?.AbsoluteUri
+            == "https://test-api.service.hmrc.gov.uk/test/fraud-prevention-headers/validate"
+        && validatorHandler.Request.Headers.Authorization?.Scheme == "Bearer"
+        && validatorHandler.Request.Headers.Contains("Gov-Client-Connection-Method"),
+        "The product fraud validator did not use the closed sandbox endpoint, OAuth or supplied headers.");
+}
 await AssertRejectedAsync(() => Task.Run(() => sandbox.ResolveApiPath("https://evil.example/steal")),
     "An absolute request-supplied host was accepted.");
 await AssertRejectedAsync(() => Task.Run(() => sandbox.ResolveApiPath("//evil.example/steal")),
@@ -210,3 +234,15 @@ finally
 }
 
 Console.WriteLine($"Submission adapter foundation tests passed ({assertions} assertions).");
+
+sealed class RecordingHandler(HttpResponseMessage response) : HttpMessageHandler
+{
+    public HttpRequestMessage? Request { get; private set; }
+
+    protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request,
+        CancellationToken cancellationToken)
+    {
+        Request = request;
+        return Task.FromResult(response);
+    }
+}
