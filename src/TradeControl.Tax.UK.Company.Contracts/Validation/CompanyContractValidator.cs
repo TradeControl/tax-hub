@@ -1,7 +1,7 @@
 using TradeControl.Tax.UK.Company.Statutory;
 using TradeControl.Tax.UK.Company.Xbrl;
 using TradeControl.Tax.UK.Hmrc.CorporationTax.Submission.V2026;
-using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis5_9;
+using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis6_0;
 
 namespace TradeControl.Tax.UK.Company.Validation;
 
@@ -20,8 +20,9 @@ public sealed class CompanyContractValidator
     {
         var f = new List<ValidationFinding>();
         var filing = package.Filing;
-        Add(string.IsNullOrWhiteSpace(package.EnvelopeNumber), "CH001", "An envelope number is required.", "EnvelopeNumber");
+        Add(package.SubmissionNumber.Length != 6, "CH001", "SubmissionNumber must contain exactly six characters.", "SubmissionNumber");
         Add(filing.AccountsDocument.Content.Length == 0, "CH002", "A non-empty accounts iXBRL document is required.", "Filing.AccountsDocument");
+        Add(filing.AccountsDocument.FileName.Length > 32, "CH003", "The attached accounts filename cannot exceed 32 characters.", "Filing.AccountsDocument.FileName");
         Add(!filing.Statements.AccountsPreparedInAccordanceWithMicroEntityProvisions,
             "CH004", "The supported filing profile requires the micro-entity provisions statement.", "Filing.Statements");
         Add(!filing.Statements.MembersHaveNotRequiredAudit,
@@ -29,7 +30,7 @@ public sealed class CompanyContractValidator
         Add(!filing.Statements.DirectorsAcknowledgeResponsibilities,
             "CH006", "The supported filing profile requires the directors' responsibilities statement.", "Filing.Statements");
         return new(f);
-        void Add(bool condition, string code, string message, string path) { if (condition) f.Add(new(ValidationSeverity.Error, code, message, path, "Companies-House-TIS-5.9-supported-profile")); }
+        void Add(bool condition, string code, string message, string path) { if (condition) f.Add(new(ValidationSeverity.Error, code, message, path, "Companies-House-TIS-6.0-supported-profile")); }
     }
 
     public ContractValidationResult Validate(StatutoryAccounts accounts)

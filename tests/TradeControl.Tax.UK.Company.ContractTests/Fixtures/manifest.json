@@ -2,7 +2,7 @@
   "profile": "ordinary-uk-private-micro-company",
   "expectedOutcome": "offline-positive",
   "contracts": {
-    "companiesHouse": "TIS-5.9",
+    "companiesHouse": "TIS-6.0",
     "ct600": "1.994",
     "frcTaxonomy": "FRC-2026-v1.0.0",
     "hmrcComputationTaxonomy": "2025-derived-catalog-requires-official-validation-assets"

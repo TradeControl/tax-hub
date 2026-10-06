@@ -3,11 +3,19 @@ using TradeControl.Tax.UK.Adapters.TradeControl.Readers;
 using TradeControl.Tax.UK.Application.DataProvision;
 using TradeControl.Tax.UK.Application.Preparation;
 using TradeControl.Tax.UK.Company.ContractInfrastructure;
-using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis5_9;
+using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis6_0;
 
 namespace TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
 
-public sealed class CompaniesHouseAccountsRunner(ConnectionFactory connectionFactory)
+public interface ICompaniesHouseAccountsRunner
+{
+    Task<PreparedSubmissionPackage> PrepareAsync(CompaniesHouseAccountsPayload payload,
+        CancellationToken cancellationToken = default);
+}
+
+public sealed class CompaniesHouseAccountsRunner(
+    ConnectionFactory connectionFactory,
+    TimeProvider timeProvider) : ICompaniesHouseAccountsRunner
 {
     public async Task<PreparedSubmissionPackage> PrepareAsync(CompaniesHouseAccountsPayload payload,
         CancellationToken cancellationToken = default)
@@ -17,7 +25,7 @@ public sealed class CompaniesHouseAccountsRunner(ConnectionFactory connectionFac
             payload.AsOfDate ?? DateOnly.FromDateTime(DateTime.Today), payload.Period, payload.ComparativePeriod,
             payload.IsFirstAccountsPeriod,
             new(review.CompanyNumber, review.MembersHaveNotRequiredAudit, review.DirectorsAcknowledgeResponsibilities,
-                review.TaxOnProfit, review.ComparativeTaxOnProfit, review.PrepaymentsAndAccruedIncome,
+                0m, null, review.PrepaymentsAndAccruedIncome,
                 review.ComparativePrepaymentsAndAccruedIncome, review.Provisions, review.ComparativeProvisions,
                 review.AccrualsAndDeferredIncome, review.ComparativeAccrualsAndDeferredIncome,
                 review.PrincipalActivity, review.AccountingPolicies, review.AverageEmployees,
@@ -30,10 +38,11 @@ public sealed class CompaniesHouseAccountsRunner(ConnectionFactory connectionFac
             $"{source.Identity.SubjectName} statutory accounts",
             $"{source.Identity.SubjectCode}-{payload.Profile}-accounts.xhtml", source.Versions);
         var filing = payload.Filing;
-        return new CompaniesHouseAccountsPreparer().Prepare(accounts, prepared, filing.EnvelopeNumber,
+        var contractDate = DateOnly.FromDateTime(timeProvider.GetUtcNow().UtcDateTime);
+        return new CompaniesHouseAccountsPreparer().Prepare(accounts, prepared, filing.SubmissionNumber,
             new RegistrarStatements(filing.AccountsPreparedInAccordanceWithMicroEntityProvisions,
                 filing.MembersHaveNotRequiredAudit, filing.DirectorsAcknowledgeResponsibilities),
-            filing.ContractVersion, payload.AsOfDate ?? DateOnly.FromDateTime(DateTime.Today),
+            filing.ContractVersion, contractDate,
             filing.AllowPreviewContract, source.Versions);
     }
 }

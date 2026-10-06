@@ -6,6 +6,8 @@ using Microsoft.AspNetCore.DataProtection;
 using TradeControl.Tax.UK.Adapters.TradeControl.Data;
 using TradeControl.Tax.UK.WebHarness.Controllers;
 using TradeControl.Tax.UK.Adapters.Submission.Audit;
+using TradeControl.Tax.UK.Adapters.Submission.CompaniesHouse;
+using TradeControl.Tax.UK.Adapters.Submission.Configuration;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Mapping;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Payloads;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
@@ -16,6 +18,7 @@ using TradeControl.Tax.UK.WebHarness.Diagnostics.Hmrc;
 using TradeControl.Tax.UK.Application.Preparation;
 
 var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddControllers();
 builder.Services.AddProblemDetails();
@@ -98,6 +101,73 @@ builder.Services.AddSingleton<CompanyAccountsPayloadValidator>();
 builder.Services.AddSingleton<CompanyAccountsRunner>();
 builder.Services.AddSingleton<CompaniesHouseAccountsPayloadValidator>();
 builder.Services.AddSingleton<CompaniesHouseAccountsRunner>();
+builder.Services.AddSingleton<ICompaniesHouseAccountsRunner>(sp =>
+    sp.GetRequiredService<CompaniesHouseAccountsRunner>());
+builder.Services.AddSingleton<ICompaniesHouseDiagnosticGatewayFactory>(sp =>
+{
+    var mode = builder.Configuration["TaxHub:CompaniesHouse:DiagnosticGateway"]
+        ?? throw new InvalidOperationException("A Companies House diagnostic gateway must be selected explicitly.");
+    return mode switch
+    {
+        "Simulator" => new InProcessCompaniesHouseDiagnosticGatewayFactory(),
+        "OfficialTestSendDisabled" => new SendDisabledCompaniesHouseOfficialTestGatewayFactory(),
+        _ => throw new InvalidOperationException("The Companies House diagnostic gateway selection is unsupported.")
+    };
+});
+builder.Services.AddSingleton<ICompaniesHouseSimulationDiagnostics>(sp =>
+    builder.Environment.IsDevelopment()
+        ? new CompaniesHouseSimulationDiagnostics(
+            sp.GetRequiredService<ICompaniesHouseAccountsRunner>(),
+            sp.GetRequiredService<ICompaniesHouseDiagnosticGatewayFactory>())
+        : new DisabledCompaniesHouseSimulationDiagnostics());
+builder.Services.AddSingleton<ICompaniesHouseOfficialTestPreflight>(sp =>
+{
+    if (!builder.Environment.IsDevelopment()) return new DisabledCompaniesHouseOfficialTestPreflight();
+    var contentRoot = sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
+    var protectedRoot = Path.GetFullPath(Path.Combine(contentRoot,
+        "../../../../.local/companies-house/test-account"));
+    var testAccount = new LabelledTextFileSecretProvider(
+        Path.Combine(protectedRoot, "credentials.txt"),
+        CompaniesHouseSecretReferences.TestAccountFileLabels);
+    var companyAuthentication = new LabelledTextFileSecretProvider(
+        Path.Combine(protectedRoot, "company-authentication.txt"),
+        new Dictionary<SecretReference, string>
+        {
+            [CompaniesHouseSecretReferences.CompanyAuthentication] = "Company Authentication Code"
+        });
+    return new CompaniesHouseOfficialTestPreflight(
+        sp.GetRequiredService<ICompaniesHouseAccountsRunner>(), testAccount, companyAuthentication);
+});
+builder.Services.AddSingleton<ICompaniesHouseOfficialTestSubmission>(sp =>
+{
+    if (!builder.Environment.IsDevelopment()
+        || !builder.Configuration.GetValue<bool>("TaxHub:CompaniesHouse:OfficialTestSendEnabled"))
+        return new DisabledCompaniesHouseOfficialTestSubmission();
+    var contentRoot = sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
+    var protectedRoot = Path.GetFullPath(Path.Combine(contentRoot,
+        "../../../../.local/companies-house/test-account"));
+    var testAccount = new LabelledTextFileSecretProvider(
+        Path.Combine(protectedRoot, "credentials.txt"),
+        CompaniesHouseSecretReferences.TestAccountFileLabels);
+    var companyAuthentication = new LabelledTextFileSecretProvider(
+        Path.Combine(protectedRoot, "company-authentication.txt"),
+        new Dictionary<SecretReference, string>
+        {
+            [CompaniesHouseSecretReferences.CompanyAuthentication] = "Company Authentication Code"
+        });
+    var routed = new RoutedSecretProvider(new Dictionary<SecretReference, ISecretProvider>
+    {
+        [CompaniesHouseSecretReferences.TestPresenterId] = testAccount,
+        [CompaniesHouseSecretReferences.TestPresenterAuthentication] = testAccount,
+        [CompaniesHouseSecretReferences.TestFlag] = testAccount,
+        [CompaniesHouseSecretReferences.TestPackageReference] = testAccount,
+        [CompaniesHouseSecretReferences.CompanyAuthentication] = companyAuthentication
+    });
+    return new CompaniesHouseOfficialTestSubmission(
+        sp.GetRequiredService<ICompaniesHouseAccountsRunner>(), routed,
+        CompaniesHouseOfficialTestGatewayFactory.Create(),
+        Path.Combine(protectedRoot, "evidence"));
+});
 builder.Services.AddSingleton<CorporationTaxPayloadValidator>();
 builder.Services.AddSingleton<CorporationTaxRunner>();
 var hmrcSandboxDiagnosticsEnabled = builder.Environment.IsDevelopment()
@@ -135,7 +205,7 @@ if (hmrcSandboxDiagnosticsEnabled)
     app.UseSwaggerUI(c =>
     {
         c.SwaggerEndpoint("/swagger/v1/swagger.json", "Tax Hub WebHarness API v1");
-        c.InjectJavascript("/swagger-fraud.js");
+        c.InjectJavascript("/swagger-fraud.js?v=20261003.1");
     });
 }
 

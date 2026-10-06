@@ -79,6 +79,34 @@ Assert(diagnosticFactoryConsumers.Length == 1
     && diagnosticFactoryConsumers[0].Contains("TradeControl.Tax.UK.WebHarness", StringComparison.Ordinal),
     "The relaxed sandbox-validator formatter escaped the development WebHarness diagnostic.");
 
+var simulator = projects.Single(path => Path.GetFileName(path) == "TradeControl.Tax.UK.Tools.CompaniesHouseSimulator.csproj");
+Assert(ProjectReferences(simulator).Count == 1
+    && ProjectReferences(simulator).Single().Contains("Company.Contracts", StringComparison.Ordinal),
+    "The Companies House simulator must depend only on the published company contracts.");
+var simulatorDirectory = Path.GetDirectoryName(simulator)!;
+Assert(!SourceContains(simulatorDirectory, "HttpClient", "Microsoft.AspNetCore", "TcpClient", "Socket("),
+    "Block A of the Companies House simulator contains a network or host dependency.");
+var simulatorConsumers = projects.Where(project => project != simulator
+        && ProjectReferences(project).Any(reference =>
+            reference.Contains("CompaniesHouseSimulator", StringComparison.Ordinal)))
+    .Select(Path.GetFileNameWithoutExtension).OrderBy(name => name, StringComparer.Ordinal).ToArray();
+Assert(simulatorConsumers.SequenceEqual(["TradeControl.Tax.UK.WebHarness"]),
+    "Only the development WebHarness may reference the Companies House simulator from production-source projects.");
+var webHarnessProgram = File.ReadAllText(Path.Combine(root, "src", "TradeControl.Tax.UK.WebHarness", "Program.cs"));
+Assert(webHarnessProgram.Contains("builder.Environment.IsDevelopment()", StringComparison.Ordinal)
+    && webHarnessProgram.Contains("DisabledCompaniesHouseSimulationDiagnostics", StringComparison.Ordinal),
+    "The WebHarness simulator composition is not fail-closed outside Development.");
+Assert(webHarnessProgram.Contains("/swagger-fraud.js?v=", StringComparison.Ordinal),
+    "The injected Swagger diagnostic script is not cache-busted after authentication behavior changes.");
+var swaggerFraudScript = File.ReadAllText(Path.Combine(root, "src", "TradeControl.Tax.UK.WebHarness",
+    "wwwroot", "swagger-fraud.js"));
+Assert(swaggerFraudScript.Contains(
+        "nativeFetch(\"/diagnostics/hmrc/fraud-prevention/browser-session\"", StringComparison.Ordinal)
+    && !swaggerFraudScript.Contains(
+        "const response = await fetch(\"/diagnostics/hmrc/fraud-prevention/browser-session\"",
+        StringComparison.Ordinal),
+    "Background Swagger browser-fact capture can force host authentication for unrelated diagnostics.");
+
 Console.WriteLine($"Tax Hub architecture tests passed ({assertions} assertions).");
 
 static string FindRoot(string start)

@@ -21,7 +21,7 @@ using TradeControl.Tax.UK.WebHarness.Controllers;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Hmrc;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Preparation;
 
-var assertions = 0;
+var assertions = await CompaniesHouseSimulationDiagnosticsTests.RunAsync();
 void Assert(bool condition, string message)
 {
     assertions++;

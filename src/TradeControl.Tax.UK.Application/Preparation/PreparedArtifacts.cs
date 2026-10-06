@@ -1,6 +1,7 @@
 using System.Collections.Immutable;
 using System.Security.Cryptography;
 using TradeControl.Tax.UK.Application.DataProvision;
+using TradeControl.Tax.UK.Company.ContractInfrastructure;
 
 namespace TradeControl.Tax.UK.Application.Preparation;
 
@@ -211,6 +212,7 @@ public enum SubmissionPollingMode
 {
     None,
     PollUntilTerminal,
+    CompaniesHouseXmlGateway,
     TransactionEngine
 }
 
@@ -337,5 +339,34 @@ public abstract class PreparedApiRequestGateway : IPreparedApiRequestGateway
 
 public interface ICompaniesHouseSubmissionPackageGateway
 {
-    Task SendAsync(PreparedSubmissionPackage package, CancellationToken cancellationToken = default);
+    Task SendAsync(CompaniesHouseSubmissionCommand command, AuthorityDispatchContext context,
+        CancellationToken cancellationToken = default);
+}
+
+public enum CompaniesHouseSubmissionOperation { Diagnostic, SubmitToAuthority }
+public sealed record CompaniesHouseSubmissionCommand(CompaniesHouseSubmissionOperation Operation,
+    PreparedSubmissionPackage Package);
+
+public abstract class CompaniesHouseSubmissionPackageGateway : ICompaniesHouseSubmissionPackageGateway
+{
+    public Task SendAsync(CompaniesHouseSubmissionCommand command, AuthorityDispatchContext context,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(context);
+        cancellationToken.ThrowIfCancellationRequested();
+        var package = command.Package;
+        var artifacts = package.Documents.Select(x => x.Artifact).Prepend(package.Transmission).ToArray();
+        if (command.Operation != CompaniesHouseSubmissionOperation.SubmitToAuthority
+            || package.ServiceCode != "COMPANIES-HOUSE-ACCOUNTS"
+            || package.Polling.Mode != SubmissionPollingMode.CompaniesHouseXmlGateway
+            || package.Polling.RelativeStatusPath != "GetSubmissionStatus"
+            || !CompanyContractRegistry.CompaniesHouseAccountsTis60.SubmissionReady
+            || artifacts.Any(x => x.Status != PreparedArtifactStatus.SubmissionReady || x.HasErrors))
+            throw new InvalidOperationException("The Companies House package is not eligible for authority dispatch.");
+        return SendEligibleAsync(command, context, cancellationToken);
+    }
+
+    protected abstract Task SendEligibleAsync(CompaniesHouseSubmissionCommand command,
+        AuthorityDispatchContext context, CancellationToken cancellationToken);
 }

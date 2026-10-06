@@ -70,7 +70,10 @@
       windowSize: { width: window.innerWidth, height: window.innerHeight }
     };
 
-    const response = await fetch("/diagnostics/hmrc/fraud-prevention/browser-session", {
+    // This is opportunistic page setup, not an explicit HMRC operation. Use the
+    // unintercepted fetch so an absent local TCWeb identity host leaves Swagger
+    // usable for unauthenticated diagnostics such as Companies House simulation.
+    const response = await nativeFetch("/diagnostics/hmrc/fraud-prevention/browser-session", {
       method: "POST",
       credentials: "same-origin",
       headers: { "Content-Type": "application/json" },

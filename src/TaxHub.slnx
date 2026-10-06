@@ -14,6 +14,9 @@
   <Folder Name="/Hosts/">
     <Project Path="TradeControl.Tax.UK.WebHarness/TradeControl.Tax.UK.WebHarness.csproj" />
   </Folder>
+  <Folder Name="/Development Tools/">
+    <Project Path="TradeControl.Tax.UK.Tools.CompaniesHouseSimulator/TradeControl.Tax.UK.Tools.CompaniesHouseSimulator.csproj" />
+  </Folder>
   <Folder Name="/Tests/">
     <Project Path="../tests/TradeControl.Tax.UK.Application.Tests/TradeControl.Tax.UK.Application.Tests.csproj" />
     <Project Path="../tests/TradeControl.Tax.UK.Adapters.TradeControl.Tests/TradeControl.Tax.UK.Adapters.TradeControl.Tests.csproj" />
@@ -24,5 +27,6 @@
     <Project Path="../tests/TradeControl.Tax.UK.WebHarness.Tests/TradeControl.Tax.UK.WebHarness.Tests.csproj" />
     <Project Path="../tests/TradeControl.Tax.UK.Architecture.Tests/TradeControl.Tax.UK.Architecture.Tests.csproj" />
     <Project Path="../tests/TradeControl.Tax.UK.Adapters.Submission.Tests/TradeControl.Tax.UK.Adapters.Submission.Tests.csproj" />
+    <Project Path="../tests/TradeControl.Tax.UK.CompaniesHouseSimulator.Tests/TradeControl.Tax.UK.CompaniesHouseSimulator.Tests.csproj" />
   </Folder>
 </Solution>

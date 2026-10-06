@@ -147,7 +147,7 @@ ORDER BY TagCode, CashCode, PeriodStartOn;
         const string sql = """
 SELECT TaxSourceCode, AsOfDate, PeriodStart, ValidationStatus, TagCode,
        ValueState, SupportStatus, StatutoryAmount, SnapshotRowVer
-FROM Cash.fnTaxBizBalanceSheet(@TaxSourceCode, @AsOfDate)
+FROM Cash.fnTaxBizBalanceSheetUK(@TaxSourceCode, @AsOfDate)
 ORDER BY TagCode;
 """;
         using var connection = _connectionFactory.Create(connectionString);
@@ -178,7 +178,7 @@ ORDER BY TagCode;
             });
             var rowVersion = Convert.ToHexString((byte[])reader["SnapshotRowVer"]);
             if (!versions.Any(item => item.RowVersion == rowVersion))
-                versions.Add(new("Cash.fnTaxBizBalanceSheet", rowVersion, null));
+                versions.Add(new("Cash.fnTaxBizBalanceSheetUK", rowVersion, null));
         }
         if (source is null)
             throw new InvalidOperationException($"Balance-sheet source '{taxSourceCode}' is not configured.");

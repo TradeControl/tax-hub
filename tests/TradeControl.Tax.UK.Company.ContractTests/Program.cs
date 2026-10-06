@@ -5,7 +5,7 @@ using TradeControl.Tax.UK.Company.Projection;
 using TradeControl.Tax.UK.Company.Statutory;
 using TradeControl.Tax.UK.Company.Validation;
 using TradeControl.Tax.UK.Company.Xbrl;
-using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis5_9;
+using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis6_0;
 using TradeControl.Tax.UK.Hmrc.CorporationTax.Ct600.V2026;
 using TradeControl.Tax.UK.Hmrc.CorporationTax.Ct600.V2026.Generated;
 using TradeControl.Tax.UK.Hmrc.CorporationTax.Submission.V2026;
@@ -21,6 +21,12 @@ var filletedReport = accountsProjection.Project(accounts, true, "Example Limited
 Assert(fullReport.Facts.Count == filletedReport.Facts.Count + 12, "Filleting did not remove the current and comparative income-statement facts.");
 Assert(fullReport.Facts.Any(x => x.Context.Period is XbrlPeriod.Instant p && p.Date == accounts.ComparativePeriod!.End), "Comparative instant facts are absent.");
 Assert(fullReport.Facts.Any(x => x.Context.Period is XbrlPeriod.Duration p && p.Start == accounts.ComparativePeriod!.Start), "Comparative duration facts are absent.");
+Assert(fullReport.Facts.Single(x => x.Concept.LocalName == "DateAuthorisationFinancialStatementsForIssue").Context.Period
+        is XbrlPeriod.Instant { Date: var approvalContextDate } && approvalContextDate == accounts.Period.End,
+    "The accounts-authorisation fact is not associated with the current accounting period.");
+Assert(fullReport.Facts.Single(x => x.Concept.LocalName == "StartDateForPeriodCoveredByReport").Context.Period
+        is XbrlPeriod.Instant { Date: var periodStartContextDate } && periodStartContextDate == accounts.Period.End,
+    "The report-start fact is not associated with the current accounting period.");
 Assert(accounts.IncomeStatement.Turnover.Current == 120000m, "Filleting mutated the source accounts.");
 Assert(validator.Validate(fullReport).IsValid, "Full accounts XBRL facts failed validation.");
 Assert(validator.Validate(filletedReport).IsValid, "Filleted accounts XBRL facts failed validation.");
@@ -34,27 +40,105 @@ Assert(fullIx.Sha256 == fullIxAgain.Sha256, "iXBRL digest is not deterministic."
 Assert(fullIx.Sha256.Length == 64, "SHA-256 digest has the wrong length.");
 var ixXml = XDocument.Parse(Encoding.UTF8.GetString(fullIx.Content));
 XNamespace ix = "http://www.xbrl.org/2013/inlineXBRL";
+XNamespace link = "http://www.xbrl.org/2003/linkbase";
 Assert(ixXml.Descendants(ix + "nonFraction").Any(), "iXBRL contains no numeric facts.");
 Assert(ixXml.Descendants(ix + "nonNumeric").Any(), "iXBRL contains no non-numeric facts.");
+var ixHeader = ixXml.Descendants(ix + "header").Single();
+Assert(ixHeader.Parent?.Name.LocalName == "div"
+    && ixHeader.Parent.Attribute("style")?.Value.Contains("display:none", StringComparison.Ordinal) == true,
+    "The required ix:header is not hidden by its XHTML container.");
+Assert(ixHeader.Elements().Select(x => x.Name).SequenceEqual([ix + "references", ix + "resources"]),
+    "The ix:header does not contain references followed by resources.");
+Assert(ixHeader.Element(ix + "references")?.Elements(link + "schemaRef").Count() == 1
+    && ixHeader.Element(ix + "resources")?.Elements(link + "schemaRef").Any() == false,
+    "The taxonomy schemaRef is not contained exclusively by ix:references.");
+Assert(ixHeader.Element(ix + "references")?.Element(link + "schemaRef")?.Attribute(XNamespace.Get("http://www.w3.org/1999/xlink") + "href")?.Value
+    == "https://xbrl.frc.org.uk/FRS-102/2026-01-01/FRS-102-2026-01-01.xsd",
+    "The FRC 2026 taxonomy entry point is not the directly retrievable HTTPS resource.");
+var taxonomy = Frc2026Catalog.MicroEntity.Concepts;
+Assert(taxonomy["CompanyName"].Name == new XbrlQName(Frc2026Catalog.BusinessNamespace, "EntityCurrentLegalOrRegisteredName")
+    && taxonomy["CompanyNumber"].Name == new XbrlQName(Frc2026Catalog.BusinessNamespace, "UKCompaniesHouseRegisteredNumber")
+    && taxonomy["PrincipalActivity"].Name == new XbrlQName(Frc2026Catalog.BusinessNamespace, "DescriptionPrincipalActivities"),
+    "FRC 2026 business-identification concepts are not mapped to the business taxonomy namespace.");
+Assert(taxonomy["TaxOnProfit"].Name.LocalName == "TaxTaxCreditOnProfitOrLossOnOrdinaryActivities"
+    && taxonomy["ProfitLoss"].Name.LocalName == "ProfitLoss"
+    && taxonomy["CreditorsWithinOneYear"].Name.LocalName == "CurrentLiabilities"
+    && taxonomy["CreditorsAfterOneYear"].Name.LocalName == "Non-currentLiabilities"
+    && taxonomy["CapitalAndReserves"].Name.LocalName == "Equity",
+    "FRC 2026 renamed core concepts are not mapped to their published taxonomy names.");
+var fixedConcepts = new HashSet<string>(StringComparer.Ordinal)
+{
+    "bus:AccountingStandardsApplied", "bus:AccountsStatusAuditedOrUnaudited", "bus:AccountsType",
+    "bus:EntityTradingStatus", "core:DirectorSigningFinancialStatements"
+};
+Assert(ixXml.Descendants(ix + "nonNumeric")
+        .Where(x => fixedConcepts.Contains(x.Attribute("name")?.Value ?? string.Empty))
+        .All(x => x.Attribute(XNamespace.Xml + "lang") is null && string.IsNullOrEmpty(x.Value)),
+    "A zero-length FRC fixedItemType fact carries text or xml:lang.");
 Assert(Encoding.UTF8.GetString(fullIx.Content).Contains("120000", StringComparison.Ordinal), "Displayed turnover is absent from full accounts.");
 Assert(!Encoding.UTF8.GetString(filletedIx.Content).Contains("120000", StringComparison.Ordinal), "Filleted accounts expose turnover.");
+var filletedXml = XDocument.Parse(Encoding.UTF8.GetString(filletedIx.Content));
+var filletedText = filletedXml.Root!.Value;
+XNamespace xhtml = "http://www.w3.org/1999/xhtml";
+Assert(!filletedXml.Descendants().Any(element => element.Name.Namespace == xhtml
+        && element.Name.LocalName is "main" or "section")
+    && filletedXml.Descendants(xhtml + "style").Single().Attribute("type")?.Value == "text/css",
+    "The accounts presentation uses XHTML content rejected by the Companies House gateway schema.");
+Assert(filletedText.Contains("Balance sheet as at", StringComparison.Ordinal)
+    && filletedText.Contains("Fixed assets", StringComparison.Ordinal)
+    && filletedText.Contains("Creditors: amounts falling due within one year", StringComparison.Ordinal)
+    && filletedText.Contains("Capital and reserves", StringComparison.Ordinal),
+    "Filleted iXBRL is not presented as a recognisable statutory balance sheet.");
+Assert(filletedText.Contains("Jane Director", StringComparison.Ordinal)
+    && filletedText.Contains("These accounts have been prepared in accordance with the micro-entity provisions.", StringComparison.Ordinal),
+    "The visible accounts omit their approval or statutory statements.");
+Assert(filletedXml.Descendants(ix + "nonFraction").Count() + filletedXml.Descendants(ix + "nonNumeric").Count()
+    == filletedReport.Facts.Count, "The visible statutory accounts do not render every projected fact exactly once.");
+Assert(filletedReport.Facts.Any(x => x.Concept.LocalName == "StatementThatAccountsHaveBeenPreparedInAccordanceWithProvisionsSmallCompaniesRegime"),
+    "TIS 6.0 micro-entity provisions statement is absent.");
+Assert(filletedReport.Facts.Any(x => x.Concept.LocalName == "StatementThatCompanyEntitledToExemptionFromAuditUnderSection477CompaniesAct2006RelatingToSmallCompanies"),
+    "TIS 6.0 section 477 statement is absent.");
+Assert(filletedReport.Facts.Any(x => x.Concept.LocalName == "AccountsType" && x.Context.Dimensions?.Single().Member.LocalName == "FilletedAccounts"),
+    "The filing accounts type dimension is absent.");
+Assert(filletedReport.Facts.Any(x => x.Concept.LocalName == "EntityDormantTruefalse" && x.Value is XbrlValue.Boolean { Value: false }),
+    "The mandatory non-dormant status fact is absent.");
 
-var chFiling = new CompaniesHouseAccountsFiling(accounts, DeliveredAccountsProfile.Filleted,
-    new RegistrarStatements(true, true, true), filletedIx);
-var chPackage = new CompaniesHouseFilingPackage("ENV-000001", chFiling);
+var chFiling = new CompaniesHouseAccountsFiling(accounts, new RegistrarStatements(true, true, true), filletedIx);
+var chPackage = new CompaniesHouseFilingPackage("ABC001", "UNALLOCATED", chFiling);
 var chSerializer = new CompaniesHouseEnvelopeSerializer();
 var chXml = chSerializer.Serialize(chPackage);
 Assert(chXml.Content.SequenceEqual(chSerializer.Serialize(chPackage).Content), "Companies House envelope is not deterministic.");
 var chDocument = XDocument.Parse(Encoding.UTF8.GetString(chXml.Content));
 Assert(chDocument.Descendants().Any(x => x.Name.LocalName == "CompanyNumber" && x.Value == "01234567"), "Companies House company number is absent.");
-Assert(chDocument.Descendants().Any(x => x.Name.LocalName == "Delivery" && x.Value == "Filleted"), "Companies House delivery profile is absent.");
-Assert(chDocument.Descendants().Any(x => x.Name.LocalName == "AccountsPreparedInAccordanceWithMicroEntityProvisions" && x.Value == "true"),
-    "Companies House micro-entity statement is absent.");
+Assert(chDocument.Descendants().Any(x => x.Name.LocalName == "FormSubmission" && x.Name.NamespaceName == CompaniesHouseEnvelopeSerializer.FormSubmissionNamespace),
+    "Published FormSubmission body is absent.");
+Assert(chDocument.Descendants().Single(x => x.Name.LocalName == "Class").Value == "Accounts"
+    && chDocument.Descendants().Single(x => x.Name.LocalName == "FormIdentifier").Value == "Accounts",
+    "The accounts filing does not use the observed Companies House Accounts routing pair.");
+Assert(chDocument.Descendants().Any(x => x.Name.LocalName == "ContentType" && x.Value == "application/xml")
+    && chDocument.Descendants().Any(x => x.Name.LocalName == "Category" && x.Value == "ACCOUNTS"),
+    "Published accounts attachment metadata is absent.");
+Assert(!chDocument.Descendants().Any(x => x.Name.LocalName is "CompanyAccounts" or "Delivery" or "SenderDetails" or "CompanyAuthenticationCode"),
+    "The preview contains an obsolete logical body or transport-time credentials.");
+var embeddedAccounts = Convert.FromBase64String(chDocument.Descendants().Single(x => x.Name.LocalName == "Data").Value);
+Assert(embeddedAccounts.SequenceEqual(filletedIx.Content), "FormSubmission did not preserve the exact iXBRL bytes.");
 Assert(validator.Validate(chPackage).IsValid, "Valid Companies House filing package was rejected.");
 var invalidChPackage = chPackage with { Filing = chFiling with { Statements = new(false, true, true) } };
 Assert(validator.Validate(invalidChPackage).Findings.Any(x => x.Code == "CH004"),
     "A missing Companies House micro-entity statement was not rejected.");
 Assert(CompaniesHouseEndpointSet.SubmitAccounts.RequiresStatusPolling, "Companies House submission must expose polling semantics.");
+var specificStatus = new CompaniesHouseSubmissionStatusRequest("PRESENTER01", CompaniesHouseStatusQueryScope.Submission, "ABC001");
+var statusRequest = chSerializer.SerializeStatusRequest(specificStatus);
+Assert(XDocument.Parse(Encoding.UTF8.GetString(statusRequest.Content)).Descendants().Any(x => x.Name.LocalName == "GetSubmissionStatus"),
+    "GetSubmissionStatus request contract is absent.");
+Assert(!specificStatus.RequiresStatusAcknowledgement
+    && new CompaniesHouseSubmissionStatusRequest("PRESENTER01", CompaniesHouseStatusQueryScope.Presenter).RequiresStatusAcknowledgement,
+    "Conditional StatusAck semantics do not distinguish specific and general polls.");
+Assert(XDocument.Parse(Encoding.UTF8.GetString(chSerializer.SerializeStatusAcknowledgement().Content)).Descendants()
+    .Any(x => x.Name.LocalName == "StatusAck" && !x.HasElements), "The conditional StatusAck contract is not empty.");
+var statusXml = Encoding.UTF8.GetBytes("<SubmissionStatus xmlns='http://xmlgw.companieshouse.gov.uk'><Status><SubmissionNumber>ABC001</SubmissionNumber><StatusCode>REJECT</StatusCode><CompanyNumber>01234567</CompanyNumber><Rejections><Reject><RejectCode>100</RejectCode><Description>Rejected</Description></Reject></Rejections></Status></SubmissionStatus>");
+Assert(chSerializer.ParseSubmissionStatuses(statusXml).Single().StatusCode == CompaniesHouseSubmissionStatusCode.Reject,
+    "Published rejection status was not parsed.");
 
 var computation = FixtureComputation(accounts.Period);
 Assert(computation.AdjustedTradingProfit == 30000m, "Adjusted trading profit calculation changed.");
@@ -111,19 +195,21 @@ Assert(allocation.CorporationTaxPeriods.All(x => x.InclusiveDays <= 366), "A CT 
 Assert(new XbrlQName("urn:test", "A") == new XbrlQName("urn:test", "A"), "QName value equality failed.");
 Assert(new XbrlQName("urn:test:one", "A") != new XbrlQName("urn:test:two", "A"), "QName ignored its namespace.");
 Assert(Frc2026Catalog.MicroEntity.Concepts["Turnover"].Name.NamespaceUri == Frc2026Catalog.CoreNamespace, "FRC concept namespace is not pinned.");
+Assert(Frc2026Catalog.MicroEntity.Concepts["AccrualsDeferredIncome"].Name.LocalName == "AccruedLiabilitiesDeferredIncome",
+    "The accruals and deferred-income balance does not use the declared FRC 2026 concept.");
 Assert(CompanyContractCatalog.Sources.Count == 3, "Authoritative source provenance is incomplete.");
 Assert(CompanyContractCatalog.Sources.All(x => x.Sha256.Length == 64), "A source checksum is invalid.");
 Assert(CompanyContractCatalog.Ct600V1994.Version == "1.994", "CT600 provenance version changed.");
-Assert(CompanyContractCatalog.CompaniesHouseTis59.Version == "5.9", "Companies House provenance version changed.");
+Assert(CompanyContractCatalog.CompaniesHouseTis60.Version == "6.0", "Companies House provenance version changed.");
 Assert(CompanyContractRegistry.SelectProduction("hmrc-ct600", new DateOnly(2026, 4, 7)).Version == "1.994", "Effective-date version selection failed.");
-Assert(CompanyContractRegistry.SelectForPreview("companies-house-accounts", "TIS-5.9", new DateOnly(2026, 9, 13)).Status == ContractStatus.Production,
+Assert(CompanyContractRegistry.SelectForPreview("companies-house-accounts", "TIS-6.0", new DateOnly(2026, 10, 3)).Status == ContractStatus.Production,
     "The effective Companies House production contract was not selected for preview.");
 Assert(CompanyContractRegistry.SelectForPreview("companies-house-accounts", "future-api", new DateOnly(2026, 9, 13), true).Status == ContractStatus.Preview,
     "Explicit future-contract preview opt-in was rejected.");
 AssertUnsupported(() => CompanyContractRegistry.SelectForPreview("companies-house-accounts", "future-api", new DateOnly(2026, 9, 13)),
     "A future Companies House contract was selected without preview opt-in.");
-AssertUnsupported(() => CompanyContractRegistry.SelectForPreview("companies-house-accounts", "TIS-5.9", new DateOnly(2026, 3, 31)),
-    "TIS 5.9 was selected before its effective date.");
+AssertUnsupported(() => CompanyContractRegistry.SelectForPreview("companies-house-accounts", "TIS-6.0", new DateOnly(2026, 9, 24)),
+    "TIS 6.0 was selected before its effective date.");
 AssertUnsupported(() => CompanyContractRegistry.SelectForPreview("companies-house-accounts", "unknown", new DateOnly(2026, 9, 13), true),
     "An unregistered Companies House contract was selected.");
 Assert(!CompanyContractRegistry.CompaniesHouseReplacement.SubmissionReady && CompanyContractRegistry.CompaniesHouseReplacement.Status == ContractStatus.Preview,

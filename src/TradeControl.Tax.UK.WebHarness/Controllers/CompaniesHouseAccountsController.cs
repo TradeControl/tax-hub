@@ -8,7 +8,10 @@ namespace TradeControl.Tax.UK.WebHarness.Controllers;
 [Route("api/company/companies-house/accounts")]
 public sealed class CompaniesHouseAccountsController(
     CompaniesHouseAccountsPayloadValidator validator,
-    CompaniesHouseAccountsRunner runner) : ControllerBase
+    ICompaniesHouseAccountsRunner runner,
+    ICompaniesHouseSimulationDiagnostics simulation,
+    ICompaniesHouseOfficialTestPreflight officialTestPreflight,
+    ICompaniesHouseOfficialTestSubmission officialTestSubmission) : ControllerBase
 {
     [HttpPost]
     [Produces("application/xml", "application/json")]
@@ -19,6 +22,99 @@ public sealed class CompaniesHouseAccountsController(
     [Produces("application/xhtml+xml", "application/json")]
     public Task<IActionResult> PrepareDocument([FromBody] CompaniesHouseAccountsPayload payload,
         CancellationToken cancellationToken) => Prepare(payload, true, cancellationToken);
+
+    [HttpPost("simulate")]
+    [Produces("application/json")]
+    public async Task<IActionResult> Simulate([FromBody] CompaniesHouseAccountsPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (!simulation.Enabled)
+            return NotFound(new { status = "error", code = "SIMULATOR_DISABLED",
+                message = "Companies House simulation is available only in Development." });
+        var validation = validator.Validate(payload);
+        if (!validation.IsValid)
+            return BadRequest(new { status = "error", code = "VALIDATION_ERROR",
+                message = "Payload validation failed.", details = validation.Errors });
+        try
+        {
+            return Ok(await simulation.ExecuteAsync(payload, cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { status = "error", code = "SIMULATION_REQUEST_ERROR", message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnprocessableEntity(new { status = "error", code = "SIMULATION_ERROR", message = exception.Message });
+        }
+        catch (SqlException)
+        {
+            return UnprocessableEntity(new { status = "error", code = "SOURCE_CONNECTION_ERROR",
+                message = "The Trade Control source could not be read using the supplied connection." });
+        }
+    }
+
+    [HttpPost("official-test-preflight")]
+    [Produces("application/json")]
+    public async Task<IActionResult> OfficialTestPreflight([FromBody] CompaniesHouseAccountsPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (!officialTestPreflight.Enabled)
+            return NotFound(new { status = "error", code = "PREFLIGHT_DISABLED",
+                message = "Companies House official-test preflight is available only in Development." });
+        var validation = validator.Validate(payload);
+        if (!validation.IsValid)
+            return BadRequest(new { status = "error", code = "VALIDATION_ERROR",
+                message = "Payload validation failed.", details = validation.Errors });
+        try
+        {
+            return Ok(await officialTestPreflight.ExecuteAsync(payload, cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { status = "error", code = "PREFLIGHT_REQUEST_ERROR", message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnprocessableEntity(new { status = "error", code = "PREFLIGHT_ERROR", message = exception.Message });
+        }
+        catch (SqlException)
+        {
+            return UnprocessableEntity(new { status = "error", code = "SOURCE_CONNECTION_ERROR",
+                message = "The Trade Control source could not be read using the supplied connection." });
+        }
+    }
+
+    [HttpPost("official-test-submit-once")]
+    [Produces("application/json")]
+    public async Task<IActionResult> OfficialTestSubmitOnce([FromBody] CompaniesHouseAccountsPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (!officialTestSubmission.Enabled)
+            return NotFound(new { status = "error", code = "OFFICIAL_TEST_SEND_DISABLED",
+                message = "Companies House official-test submission is not enabled for this process." });
+        var validation = validator.Validate(payload);
+        if (!validation.IsValid)
+            return BadRequest(new { status = "error", code = "VALIDATION_ERROR",
+                message = "Payload validation failed.", details = validation.Errors });
+        try
+        {
+            return Ok(await officialTestSubmission.ExecuteOnceAsync(payload, cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { status = "error", code = "OFFICIAL_TEST_REQUEST_ERROR", message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnprocessableEntity(new { status = "error", code = "OFFICIAL_TEST_EXCHANGE_ERROR", message = exception.Message });
+        }
+        catch (SqlException)
+        {
+            return UnprocessableEntity(new { status = "error", code = "SOURCE_CONNECTION_ERROR",
+                message = "The Trade Control source could not be read using the supplied connection." });
+        }
+    }
 
     private async Task<IActionResult> Prepare(CompaniesHouseAccountsPayload payload, bool document,
         CancellationToken cancellationToken)
@@ -40,7 +136,7 @@ public sealed class CompaniesHouseAccountsController(
             Response.Headers.Append("X-Companies-House-Contract", package.Transmission.ContractVersion);
             Response.Headers.Append("X-Polling-Mode", package.Polling.Mode.ToString());
             Response.Headers.Append("X-Polling-Path", package.Polling.RelativeStatusPath ?? string.Empty);
-            var fileName = document ? package.Documents.Single().Name : $"{payload.Filing.EnvelopeNumber}-companies-house.xml";
+            var fileName = document ? package.Documents.Single().Name : $"{payload.Filing.SubmissionNumber}-companies-house.xml";
             return File(selected.Content.ToArray(), selected.MediaType, fileName);
         }
         catch (InvalidOperationException exception)

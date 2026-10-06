@@ -227,6 +227,8 @@ try
     assertions += await OAuthTests.RunAsync(root, provider);
     assertions += await FraudPreventionTests.RunAsync(root);
     assertions += await RestGatewayTests.RunAsync(root, provider);
+    assertions += await CompaniesHouseMaterializerTests.RunAsync(root);
+    assertions += await CompaniesHouseHttpGatewayTests.RunAsync();
 }
 finally
 {

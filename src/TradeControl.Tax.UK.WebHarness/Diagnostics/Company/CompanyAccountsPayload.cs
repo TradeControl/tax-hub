@@ -19,19 +19,38 @@ public class CompanyAccountsPayload
     public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
-public sealed class CompaniesHouseAccountsPayload : CompanyAccountsPayload
+public sealed class CompaniesHouseAccountsPayload
 {
+    public string SqlConnection { get; set; } = string.Empty;
+    public string Pilot { get; set; } = string.Empty;
+    public string Profile { get; set; } = "filleted";
+    public DateOnly? AsOfDate { get; set; }
+    public ReportingWindow? Period { get; set; }
+    public ReportingWindow? ComparativePeriod { get; set; }
+    public bool IsFirstAccountsPeriod { get; set; }
+    public CompaniesHouseAccountsReviewPayload Review { get; set; } = new();
     public CompaniesHouseFilingPayload Filing { get; set; } = new();
+    public CompaniesHouseSimulationPayload Simulation { get; set; } = new();
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+public sealed class CompaniesHouseSimulationPayload
+{
+    public string Scenario { get; set; } = "happy-accept";
 }
 
 public sealed class CompaniesHouseFilingPayload
 {
-    public string EnvelopeNumber { get; set; } = string.Empty;
-    public string ContractVersion { get; set; } = "TIS-5.9";
+    public string SubmissionNumber { get; set; } = string.Empty;
+    public string TransactionId { get; set; } = string.Empty;
+    public string ContractVersion { get; set; } = "TIS-6.0";
     public bool AllowPreviewContract { get; set; }
     public bool AccountsPreparedInAccordanceWithMicroEntityProvisions { get; set; } = true;
     public bool MembersHaveNotRequiredAudit { get; set; } = true;
     public bool DirectorsAcknowledgeResponsibilities { get; set; } = true;
+    public bool AuthorizeOfficialTestSubmission { get; set; }
 }
 
 public sealed class CompanyAccountsReviewPayload
@@ -55,6 +74,30 @@ public sealed class CompanyAccountsReviewPayload
     public DateOnly ApprovedOn { get; set; }
     public string SigningDirectorCode { get; set; } = string.Empty;
     public string SigningDirectorName { get; set; } = string.Empty;
+}
+
+public sealed class CompaniesHouseAccountsReviewPayload
+{
+    public string? CompanyNumber { get; set; }
+    public bool MembersHaveNotRequiredAudit { get; set; } = true;
+    public bool DirectorsAcknowledgeResponsibilities { get; set; } = true;
+    public decimal PrepaymentsAndAccruedIncome { get; set; }
+    public decimal? ComparativePrepaymentsAndAccruedIncome { get; set; }
+    public decimal Provisions { get; set; }
+    public decimal? ComparativeProvisions { get; set; }
+    public decimal AccrualsAndDeferredIncome { get; set; }
+    public decimal? ComparativeAccrualsAndDeferredIncome { get; set; }
+    public string? PrincipalActivity { get; set; }
+    public string? AccountingPolicies { get; set; }
+    public int? AverageEmployees { get; set; }
+    public IReadOnlyList<DirectorAdvanceDraft> DirectorAdvances { get; set; } = [];
+    public IReadOnlyList<CommitmentDraft> CommitmentsAndContingencies { get; set; } = [];
+    public DateOnly ApprovedOn { get; set; }
+    public string SigningDirectorCode { get; set; } = string.Empty;
+    public string SigningDirectorName { get; set; } = string.Empty;
+
+    [JsonExtensionData]
+    public Dictionary<string, JsonElement>? Extra { get; set; }
 }
 
 public sealed record CompanyAccountsPayloadValidation(

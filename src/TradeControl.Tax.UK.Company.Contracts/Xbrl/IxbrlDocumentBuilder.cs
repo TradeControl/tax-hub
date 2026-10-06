@@ -21,12 +21,20 @@ public sealed class IxbrlDocumentBuilder
         var contextIds = contexts.Select((x, i) => (x, id: $"c{i + 1}" )).ToDictionary(x => x.x, x => x.id);
         var unitIds = units.Select((x, i) => (x, id: $"u{i + 1}" )).ToDictionary(x => x.x, x => x.id);
 
+        var references = new XElement(Ix + "references",
+            new XElement(Link + "schemaRef", new XAttribute(Xlink + "type", "simple"), new XAttribute(Xlink + "href", report.Taxonomy.EntryPoint)));
         var resources = new XElement(Ix + "resources",
-            new XElement(Link + "schemaRef", new XAttribute(Xlink + "type", "simple"), new XAttribute(Xlink + "href", report.Taxonomy.EntryPoint)),
             contexts.Select(x => ContextElement(x, contextIds[x])),
             units.Select(x => UnitElement(x, unitIds[x])));
 
-        var facts = report.Facts.OrderBy(x => x.Concept.ToString()).ThenBy(x => contextIds[x.Context]).Select((fact, i) => FactElement(fact, contextIds[fact.Context], fact.Unit is null ? null : unitIds[fact.Unit], i + 1));
+        var orderedFacts = report.Facts.OrderBy(x => x.Concept.ToString()).ThenBy(x => contextIds[x.Context]).ToArray();
+        var factIndexes = orderedFacts.Select((fact, index) => (fact, index: index + 1)).ToDictionary(x => x.fact, x => x.index);
+        XElement RenderFact(XbrlFact fact) => FactElement(fact, contextIds[fact.Context],
+            fact.Unit is null ? null : unitIds[fact.Unit], factIndexes[fact]);
+        var body = report.Presentation?.Kind == IxbrlPresentationKind.StatutoryAccounts
+            ? StatutoryAccountsBody(report, orderedFacts, RenderFact)
+            : new XElement(Xhtml + "table", orderedFacts.Select(x =>
+                new XElement(Xhtml + "tr", new XElement(Xhtml + "td", RenderFact(x)))));
         var root = new XElement(Xhtml + "html",
                 new XAttribute(XNamespace.Xmlns + "ix", Ix),
                 new XAttribute(XNamespace.Xmlns + "xbrli", Xbrli),
@@ -34,13 +42,16 @@ public sealed class IxbrlDocumentBuilder
                 new XAttribute(XNamespace.Xmlns + "link", Link),
                 new XAttribute(XNamespace.Xmlns + "xlink", Xlink),
                 new XAttribute(XNamespace.Xmlns + "core", Frc2026Catalog.CoreNamespace),
+                new XAttribute(XNamespace.Xmlns + "bus", Frc2026Catalog.BusinessNamespace),
+                new XAttribute(XNamespace.Xmlns + "direp", Frc2026Catalog.DirectorsReportNamespace),
                 new XAttribute(XNamespace.Xmlns + "ctcomp", CorporationTaxComputationNamespace),
                 new XAttribute(XNamespace.Xmlns + "iso4217", "http://www.xbrl.org/2003/iso4217"),
-                new XElement(Xhtml + "head", new XElement(Xhtml + "title", report.Title)),
+                new XElement(Xhtml + "head", new XElement(Xhtml + "title", report.Title),
+                    new XElement(Xhtml + "style", new XAttribute("type", "text/css"), "body{font-family:Arial,sans-serif;max-width:900px;margin:2rem auto;color:#222}h1,h2{text-align:center}.identity{text-align:center}.accounts{width:100%;border-collapse:collapse;margin:1.5rem 0}.accounts th,.accounts td{padding:.4rem .6rem;border-bottom:1px solid #ddd}.accounts th:first-child,.accounts td:first-child{text-align:left}.accounts th:not(:first-child),.accounts td:not(:first-child){text-align:right}.total td{font-weight:bold;border-top:1px solid #222}.statements p{margin:.7rem 0}.signature{margin-top:2rem}.filing-information{font-size:.85rem;color:#444}")),
                 new XElement(Xhtml + "body",
-                    new XElement(Xhtml + "div", new XAttribute("style", "display:none"), resources),
-                    new XElement(Xhtml + "h1", report.Title),
-                    new XElement(Xhtml + "table", facts.Select(x => new XElement(Xhtml + "tr", new XElement(Xhtml + "td", x))))));
+                    new XElement(Xhtml + "div", new XAttribute("style", "display:none"),
+                        new XElement(Ix + "header", references, resources)),
+                    body));
         var document = new XDocument(new XDeclaration("1.0", "utf-8", null), root);
 
         using var stream = new MemoryStream();
@@ -48,6 +59,106 @@ public sealed class IxbrlDocumentBuilder
             document.Save(writer);
         var bytes = stream.ToArray();
         return new(fileName, "application/xhtml+xml", bytes, Convert.ToHexString(SHA256.HashData(bytes)));
+    }
+
+    private static XElement StatutoryAccountsBody(IxbrlReport report, IReadOnlyList<XbrlFact> facts,
+        Func<XbrlFact, XElement> render)
+    {
+        var used = new HashSet<XbrlFact>();
+        XbrlQName Concept(string key) => report.Taxonomy.Concepts[key].Name;
+        XbrlFact? Find(string key, Func<XbrlFact, bool>? predicate = null)
+        {
+            var name = Concept(key);
+            var fact = facts.FirstOrDefault(x => x.Concept == name && (predicate is null || predicate(x)) && !used.Contains(x));
+            if (fact is not null) used.Add(fact);
+            return fact;
+        }
+        object Tagged(string key, Func<XbrlFact, bool>? predicate = null)
+        {
+            var fact = Find(key, predicate);
+            return fact is null ? string.Empty : render(fact);
+        }
+        static bool InstantOn(XbrlFact fact, DateOnly date) => fact.Context.Period is XbrlPeriod.Instant instant && instant.Date == date;
+        static bool DurationEndingOn(XbrlFact fact, DateOnly date) => fact.Context.Period is XbrlPeriod.Duration duration && duration.End == date;
+
+        var balanceSheetDateFact = facts.Single(x => x.Concept == Concept("BalanceSheetDate"));
+        var currentDate = ((XbrlValue.Date)balanceSheetDateFact.Value).Value;
+        var comparativeDate = facts
+            .Where(x => x.Value is XbrlValue.Monetary && x.Context.Period is XbrlPeriod.Instant)
+            .Select(x => ((XbrlPeriod.Instant)x.Context.Period).Date)
+            .Where(x => x != currentDate).Distinct().OrderByDescending(x => x).Cast<DateOnly?>().FirstOrDefault();
+        var presentation = report.Presentation!;
+
+        XElement BalanceRow(string label, string key, bool total = false) =>
+            new(Xhtml + "tr", total ? new XAttribute("class", "total") : null,
+                new XElement(Xhtml + "td", label),
+                new XElement(Xhtml + "td", Tagged(key, x => InstantOn(x, currentDate))),
+                comparativeDate is null ? null : new XElement(Xhtml + "td", Tagged(key, x => InstantOn(x, comparativeDate.Value))));
+        XElement IncomeRow(string label, string key, bool total = false) =>
+            new(Xhtml + "tr", total ? new XAttribute("class", "total") : null,
+                new XElement(Xhtml + "td", label),
+                new XElement(Xhtml + "td", Tagged(key, x => DurationEndingOn(x, currentDate))),
+                comparativeDate is null ? null : new XElement(Xhtml + "td", Tagged(key, x => DurationEndingOn(x, comparativeDate.Value))));
+
+        var companyName = Tagged("CompanyName");
+        var companyNumber = Tagged("CompanyNumber");
+        used.Add(balanceSheetDateFact);
+        var balanceSheetDate = render(balanceSheetDateFact);
+        var content = new List<object>
+        {
+            new XElement(Xhtml + "h1", companyName),
+            new XElement(Xhtml + "p", new XAttribute("class", "identity"), "Registered number: ", companyNumber),
+            new XElement(Xhtml + "h2", presentation.Filleted ? "Filleted micro-entity accounts" : "Micro-entity accounts"),
+            new XElement(Xhtml + "h2", "Balance sheet as at ", balanceSheetDate),
+            new XElement(Xhtml + "table", new XAttribute("class", "accounts"),
+                new XElement(Xhtml + "thead", new XElement(Xhtml + "tr",
+                    new XElement(Xhtml + "th", string.Empty), new XElement(Xhtml + "th", currentDate.Year),
+                    comparativeDate is null ? null : new XElement(Xhtml + "th", comparativeDate.Value.Year))),
+                new XElement(Xhtml + "tbody",
+                    BalanceRow("Fixed assets", "FixedAssets"),
+                    BalanceRow("Current assets", "CurrentAssets"),
+                    BalanceRow("Prepayments and accrued income", "Prepayments"),
+                    BalanceRow("Creditors: amounts falling due within one year", "CreditorsWithinOneYear"),
+                    BalanceRow("Net current assets (liabilities)", "NetCurrentAssets", true),
+                    BalanceRow("Total assets less current liabilities", "TotalAssetsLessCurrentLiabilities", true),
+                    BalanceRow("Creditors: amounts falling due after one year", "CreditorsAfterOneYear"),
+                    BalanceRow("Provisions for liabilities", "Provisions"),
+                    BalanceRow("Accrued liabilities and deferred income", "AccrualsDeferredIncome"),
+                    BalanceRow("Net assets (liabilities)", "NetAssets", true),
+                    BalanceRow("Capital and reserves", "CapitalAndReserves", true)))
+        };
+
+        if (!presentation.Filleted)
+            content.Add(new XElement(Xhtml + "div", new XElement(Xhtml + "h2", "Income statement"),
+                new XElement(Xhtml + "table", new XAttribute("class", "accounts"),
+                    new XElement(Xhtml + "tbody", IncomeRow("Turnover", "Turnover"), IncomeRow("Other income", "OtherIncome"),
+                        IncomeRow("Cost of sales", "CostOfSales"), IncomeRow("Administrative expenses", "AdministrativeExpenses"),
+                        IncomeRow("Tax on profit or loss", "TaxOnProfit"), IncomeRow("Profit (loss) for the period", "ProfitLoss", true)))));
+
+        content.Add(new XElement(Xhtml + "div", new XAttribute("class", "statements"),
+            new XElement(Xhtml + "h2", "Statements"),
+            new XElement(Xhtml + "p", Tagged("MicroEntityProvisions")),
+            new XElement(Xhtml + "p", Tagged("Section477")),
+            new XElement(Xhtml + "p", Tagged("MembersNoAudit")),
+            new XElement(Xhtml + "p", Tagged("DirectorsResponsibilities"))));
+        content.Add(new XElement(Xhtml + "div", new XElement(Xhtml + "h2", "Notes"),
+            new XElement(Xhtml + "p", new XElement(Xhtml + "strong", "Principal activity: "), Tagged("PrincipalActivity")),
+            new XElement(Xhtml + "p", new XElement(Xhtml + "strong", "Average number of employees: "), Tagged("AverageEmployees"))));
+        content.Add(new XElement(Xhtml + "div", new XAttribute("class", "signature"),
+            new XElement(Xhtml + "p", "Approved by the board on ", Tagged("AccountsApprovedOn")),
+            new XElement(Xhtml + "p", Tagged("DirectorSigning"), presentation.SigningDirectorName, ", Director")));
+
+        var metadata = new[] { "PeriodStart", "PeriodEnd", "AccountsStatus", "AccountsType", "AccountingStandards", "TradingStatus", "DormantStatus" }
+            .Select(key => new XElement(Xhtml + "li", key, ": ", Tagged(key))).ToArray();
+        content.Add(new XElement(Xhtml + "div", new XAttribute("class", "filing-information"),
+            new XElement(Xhtml + "h2", "Accounts information"), new XElement(Xhtml + "ul", metadata)));
+        var remaining = facts.Where(x => !used.Contains(x)).ToArray();
+        if (remaining.Length > 0)
+            content.Add(new XElement(Xhtml + "div", new XAttribute("class", "filing-information"),
+                new XElement(Xhtml + "h2", "Additional filing information"),
+                new XElement(Xhtml + "ul", remaining.Select(x => new XElement(Xhtml + "li", x.Concept.LocalName, ": ", render(x))))));
+
+        return new XElement(Xhtml + "div", new XAttribute("class", "accounts-document"), content);
     }
 
     private static XElement ContextElement(XbrlContext context, string id) =>
@@ -82,6 +193,8 @@ public sealed class IxbrlDocumentBuilder
     private static string QName(XbrlQName name) => name.NamespaceUri switch
     {
         Frc2026Catalog.CoreNamespace => $"core:{name.LocalName}",
+        Frc2026Catalog.BusinessNamespace => $"bus:{name.LocalName}",
+        Frc2026Catalog.DirectorsReportNamespace => $"direp:{name.LocalName}",
         CorporationTaxComputationNamespace => $"ctcomp:{name.LocalName}",
         "http://www.xbrl.org/2003/iso4217" => $"iso4217:{name.LocalName}",
         "http://www.xbrl.org/2003/instance" => $"xbrli:{name.LocalName}",

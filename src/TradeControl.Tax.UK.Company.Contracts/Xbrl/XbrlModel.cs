@@ -36,6 +36,7 @@ public abstract record XbrlValue
     public sealed record Integer(long Value) : XbrlValue;
     public sealed record Boolean(bool Value) : XbrlValue;
     public sealed record Date(DateOnly Value) : XbrlValue;
+    public sealed record Fixed : XbrlValue;
     public sealed record Text(string Value, string Language = "en") : XbrlValue;
 
     internal string ToInvariantString() => this switch
@@ -45,6 +46,7 @@ public abstract record XbrlValue
         Integer x => x.Value.ToString(CultureInfo.InvariantCulture),
         Boolean x => x.Value ? "true" : "false",
         Date x => x.Value.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+        Fixed => string.Empty,
         Text x => x.Value,
         _ => throw new InvalidOperationException("Unsupported XBRL value.")
     };
@@ -71,10 +73,23 @@ public sealed record TaxonomyContract(
     string Status,
     IReadOnlyDictionary<string, TaxonomyConcept> Concepts);
 
+public enum IxbrlPresentationKind
+{
+    Generic,
+    StatutoryAccounts
+}
+
+public sealed record IxbrlPresentation(
+    IxbrlPresentationKind Kind,
+    string Currency,
+    bool Filleted,
+    string SigningDirectorName);
+
 public sealed record IxbrlReport(
     string Title,
     TaxonomyContract Taxonomy,
-    IReadOnlyList<XbrlFact> Facts);
+    IReadOnlyList<XbrlFact> Facts,
+    IxbrlPresentation? Presentation = null);
 
 public sealed record DocumentArtifact(
     string FileName,

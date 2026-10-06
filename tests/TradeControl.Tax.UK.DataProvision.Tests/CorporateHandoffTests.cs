@@ -1,7 +1,7 @@
 using TradeControl.Tax.UK.Application.Preparation;
 using TradeControl.Tax.UK.Company.ContractInfrastructure;
 using TradeControl.Tax.UK.Company.Statutory;
-using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis5_9;
+using TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis6_0;
 using TradeControl.Tax.UK.Hmrc.CorporationTax.Ct600.V2026;
 
 internal static class CorporateHandoffTests
@@ -14,7 +14,7 @@ internal static class CorporateHandoffTests
         var filleted = accountsPreparer.Prepare(accounts, true, "Example Limited statutory accounts", "01234567-filleted-accounts.xhtml");
 
         var companiesHouse = new CompaniesHouseAccountsPreparer().Prepare(
-            accounts, filleted, "ENV-HANDOFF-1", new(true, true, true), "TIS-5.9", new(2026, 9, 13), false);
+            accounts, filleted, "ABC001", new(true, true, true), "TIS-6.0", new(2026, 10, 3), false);
         var computation = new CorporationTaxComputation(accounts.Period, 28000m,
             [new("Depreciation", 5000m)], [new("Non-trading income", 1000m)], new(2000m, 0m, 0m),
             new(0m, 0m, 0m, 0m), 0m, 30000m, 0.19m, 5700m, 0m, 5700m);
@@ -24,11 +24,12 @@ internal static class CorporateHandoffTests
         var corporationTax = new CorporationTaxPreparer().Prepare(
             new(computation, taxReturn), full, "CT-HANDOFF-1").Package;
 
-        await AssertUnchangedAsync(companiesHouse, "Companies House");
+        await AssertCompaniesHouseGateAsync(companiesHouse);
         await AssertCorporationTaxGateAsync(corporationTax);
 
         Assert(companiesHouse.ServiceCode == "COMPANIES-HOUSE-ACCOUNTS"
-            && companiesHouse.Polling.Mode == SubmissionPollingMode.PollUntilTerminal
+            && companiesHouse.Polling.Mode == SubmissionPollingMode.CompaniesHouseXmlGateway
+            && companiesHouse.Polling.RelativeStatusPath == "GetSubmissionStatus"
             && companiesHouse.Documents.Single().Name == "01234567-filleted-accounts.xhtml",
             "Companies House package composition or polling semantics changed.");
         Assert(corporationTax.ServiceCode == "HMRC-CORPORATION-TAX"
@@ -43,6 +44,26 @@ internal static class CorporateHandoffTests
             Assert(CompanyServiceCoverageCatalog.Services.Any(x =>
                     x.ContractId == contract.ContractId && x.ContractVersion == contract.Version),
                 $"Contract {contract.ContractId} {contract.Version} is absent from the corporate service matrix.");
+    }
+
+    private static async Task AssertCompaniesHouseGateAsync(PreparedSubmissionPackage package)
+    {
+        Assert(package.Transmission.Status == PreparedArtifactStatus.Preview
+            && package.Transmission.Findings.Any(x => x.Code == "CH-PENDING-CREDENTIALS")
+            && package.Transmission.Findings.Any(x => x.Code == "CH-PENDING-DEVELOPER-TEST"),
+            "Companies House pending credential and developer-test gates are not explicit.");
+        var gateway = new RecordingCompaniesHouseGateway();
+        var context = new AuthorityDispatchContext("tenant-ch", "principal-ch", "actor-ch", "approval-ch", "facts-ch");
+        try
+        {
+            await gateway.SendAsync(new(CompaniesHouseSubmissionOperation.SubmitToAuthority, package), context);
+        }
+        catch (InvalidOperationException)
+        {
+            Assert(gateway.SendCount == 0, "The blocked Companies House package reached outbound transport.");
+            return;
+        }
+        throw new InvalidOperationException("The blocked Companies House package crossed the readiness gate.");
     }
 
     private static async Task AssertCorporationTaxGateAsync(PreparedSubmissionPackage package)
@@ -139,30 +160,13 @@ internal static class CorporateHandoffTests
         throw new InvalidOperationException(message);
     }
 
-    private static async Task AssertUnchangedAsync(PreparedSubmissionPackage package, string name)
+    private sealed class RecordingCompaniesHouseGateway : CompaniesHouseSubmissionPackageGateway
     {
-        var gateway = new CapturingGateway();
-        var transmission = package.Transmission.Content.ToArray();
-        var documents = package.Documents.Select(x => new Snapshot(
-            x.Name, x.Artifact.MediaType, x.Artifact.Sha256, x.Artifact.Content.ToArray())).ToArray();
-        await gateway.SendAsync(package);
-
-        Assert(ReferenceEquals(package, gateway.Received), $"{name} gateway reconstructed the package.");
-        Assert(package.Transmission.Content.AsSpan().SequenceEqual(transmission), $"{name} transmission bytes changed at handoff.");
-        Assert(package.Documents.Select(x => new Snapshot(x.Name, x.Artifact.MediaType, x.Artifact.Sha256, x.Artifact.Content.ToArray()))
-            .Zip(documents).All(pair => pair.First.Name == pair.Second.Name
-                && pair.First.MediaType == pair.Second.MediaType
-                && pair.First.Sha256 == pair.Second.Sha256
-                && pair.First.Content.SequenceEqual(pair.Second.Content)),
-            $"{name} constituent documents changed at handoff.");
-    }
-
-    private sealed class CapturingGateway : ICompaniesHouseSubmissionPackageGateway
-    {
-        public PreparedSubmissionPackage? Received { get; private set; }
-        public Task SendAsync(PreparedSubmissionPackage package, CancellationToken cancellationToken = default)
+        public int SendCount { get; private set; }
+        protected override Task SendEligibleAsync(CompaniesHouseSubmissionCommand command,
+            AuthorityDispatchContext context, CancellationToken cancellationToken)
         {
-            Received = package;
+            SendCount++;
             return Task.CompletedTask;
         }
     }

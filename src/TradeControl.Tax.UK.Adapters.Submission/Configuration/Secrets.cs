@@ -115,6 +115,71 @@ public sealed class JsonFileSecretProvider : ISecretProvider
     }
 }
 
+public sealed class LabelledTextFileSecretProvider : ISecretProvider
+{
+    private readonly string _settingsPath;
+    private readonly IReadOnlyDictionary<string, string> _approvedLabels;
+
+    public LabelledTextFileSecretProvider(string settingsPath,
+        IReadOnlyDictionary<SecretReference, string> approvedLabels)
+    {
+        if (string.IsNullOrWhiteSpace(settingsPath) || !Path.IsPathFullyQualified(settingsPath))
+            throw new ArgumentException("The secret settings path must be absolute.", nameof(settingsPath));
+        ArgumentNullException.ThrowIfNull(approvedLabels);
+        if (approvedLabels.Count == 0 || approvedLabels.Any(item => string.IsNullOrWhiteSpace(item.Value)))
+            throw new ArgumentException("At least one approved text label is required.", nameof(approvedLabels));
+        _settingsPath = Path.GetFullPath(settingsPath);
+        _approvedLabels = approvedLabels.ToDictionary(item => item.Key.Value, item => item.Value,
+            StringComparer.Ordinal);
+    }
+
+    public async ValueTask<ProtectedSecret> ResolveAsync(SecretReference reference,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        if (!_approvedLabels.TryGetValue(reference.Value, out var approvedLabel))
+            throw new KeyNotFoundException("The requested secret reference is not approved by this provider.");
+
+        string? resolved = null;
+        using var reader = new StreamReader(new FileStream(_settingsPath, FileMode.Open, FileAccess.Read,
+            FileShare.Read, 4096, FileOptions.Asynchronous | FileOptions.SequentialScan));
+        while (await reader.ReadLineAsync(cancellationToken) is { } line)
+        {
+            var delimiter = line.IndexOfAny([':', '=']);
+            if (delimiter < 0 || !string.Equals(line[..delimiter].Trim(), approvedLabel, StringComparison.Ordinal))
+                continue;
+            if (resolved is not null)
+                throw new InvalidOperationException("The approved secret label occurs more than once.");
+            resolved = line[(delimiter + 1)..].Trim();
+        }
+        if (string.IsNullOrEmpty(resolved))
+            throw new InvalidOperationException("The approved secret is absent from the protected settings source.");
+        return new ProtectedSecret(resolved);
+    }
+}
+
+public sealed class RoutedSecretProvider : ISecretProvider
+{
+    private readonly IReadOnlyDictionary<string, ISecretProvider> _routes;
+
+    public RoutedSecretProvider(IReadOnlyDictionary<SecretReference, ISecretProvider> routes)
+    {
+        ArgumentNullException.ThrowIfNull(routes);
+        if (routes.Count == 0 || routes.Any(item => item.Value is null))
+            throw new ArgumentException("At least one approved secret-provider route is required.", nameof(routes));
+        _routes = routes.ToDictionary(item => item.Key.Value, item => item.Value, StringComparer.Ordinal);
+    }
+
+    public ValueTask<ProtectedSecret> ResolveAsync(SecretReference reference,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(reference);
+        if (!_routes.TryGetValue(reference.Value, out var provider))
+            throw new KeyNotFoundException("The requested secret reference has no approved provider route.");
+        return provider.ResolveAsync(reference, cancellationToken);
+    }
+}
+
 public static class HmrcSecretReferences
 {
     public static SecretReference ClientId { get; } = new("hmrc-api-client-id");
@@ -132,5 +197,46 @@ public static class HmrcSecretReferences
         {
             [ClientId] = "TaxHub__HmrcSandbox__ClientId",
             [ClientSecret] = "TaxHub__HmrcSandbox__ClientSecret"
+        };
+}
+
+public static class CompaniesHouseSecretReferences
+{
+    public static SecretReference TestPresenterId { get; } = new("companies-house-test-presenter-id");
+    public static SecretReference TestPresenterAuthentication { get; } =
+        new("companies-house-test-presenter-authentication");
+    public static SecretReference TestFlag { get; } = new("companies-house-test-flag");
+    public static SecretReference TestPackageReference { get; } =
+        new("companies-house-test-package-reference");
+    public static SecretReference CompanyAuthentication { get; } =
+        new("companies-house-company-authentication");
+
+    public static IReadOnlyDictionary<SecretReference, string> JsonProperties { get; } =
+        new Dictionary<SecretReference, string>
+        {
+            [TestPresenterId] = "testPresenterId",
+            [TestPresenterAuthentication] = "testPresenterAuthentication",
+            [TestFlag] = "testFlag",
+            [TestPackageReference] = "testPackageReference",
+            [CompanyAuthentication] = "companyAuthentication"
+        };
+
+    public static IReadOnlyDictionary<SecretReference, string> TestAccountFileLabels { get; } =
+        new Dictionary<SecretReference, string>
+        {
+            [TestPresenterId] = "Test Presenter ID",
+            [TestPresenterAuthentication] = "Authentication Value",
+            [TestFlag] = "Test Flag",
+            [TestPackageReference] = "Test Package Reference"
+        };
+
+    public static IReadOnlyDictionary<SecretReference, string> AppServiceEnvironmentVariables { get; } =
+        new Dictionary<SecretReference, string>
+        {
+            [TestPresenterId] = "TaxHub__CompaniesHouse__TestPresenterId",
+            [TestPresenterAuthentication] = "TaxHub__CompaniesHouse__TestPresenterAuthentication",
+            [TestFlag] = "TaxHub__CompaniesHouse__TestFlag",
+            [TestPackageReference] = "TaxHub__CompaniesHouse__TestPackageReference",
+            [CompanyAuthentication] = "TaxHub__CompaniesHouse__CompanyAuthentication"
         };
 }

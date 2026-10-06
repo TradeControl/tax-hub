@@ -11,10 +11,10 @@ public sealed record VersionedContract(
 
 public static class CompanyContractRegistry
 {
-    public static VersionedContract CompaniesHouseAccountsTis59 { get; } = new(
-        "companies-house-accounts", "TIS-5.9", new DateOnly(2026, 4, 1), null,
+    public static VersionedContract CompaniesHouseAccountsTis60 { get; } = new(
+        "companies-house-accounts", "TIS-6.0", new DateOnly(2026, 9, 25), null,
         ContractStatus.Production, false,
-        "TIS 5.9 defines the accounts document rules, but the separately referenced Filing TIS envelope schemas are not provisioned in this repository.");
+        "Published TIS 6.0 and live GovTalk schemas are modelled; presenter credentials, company authentication and developer-test acceptance remain pending.");
 
     public static VersionedContract CompaniesHouseReplacement { get; } = new(
         "companies-house-accounts", "future-api", new DateOnly(2028, 1, 1), null,
@@ -63,5 +63,5 @@ public static class CompanyContractRegistry
     }
 
     public static IReadOnlyList<VersionedContract> All { get; } =
-        [CompaniesHouseAccountsTis59, CompaniesHouseReplacement, HmrcCt600V1994, HmrcComputationTaxonomy2025];
+        [CompaniesHouseAccountsTis60, CompaniesHouseReplacement, HmrcCt600V1994, HmrcComputationTaxonomy2025];
 }

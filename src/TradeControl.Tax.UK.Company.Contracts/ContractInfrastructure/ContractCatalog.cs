@@ -24,10 +24,10 @@ public sealed record SubmissionServiceDescriptor(
 
 public static class CompanyContractCatalog
 {
-    public static SourceProvenance CompaniesHouseTis59 { get; } = new(
-        "companies-house-accounts-tis-5.9", "Companies House technical interface specification for accounts",
-        new Uri("https://assets.publishing.service.gov.uk/media/69c5421c23fcbcd838a6f78f/Companies_House_technical_interface_specification__TIS__for_accounts_5.9__003_.odt"),
-        "5.9", new DateOnly(2026, 4, 1), "CB92AA331CCC9913B6E1B1AC0FD600120EA30AF1D0B2994078E43CAAB61F3DAF", "Provenance only");
+    public static SourceProvenance CompaniesHouseTis60 { get; } = new(
+        "companies-house-accounts-tis-6.0", "Companies House technical interface specification for accounts",
+        new Uri("https://www.gov.uk/government/publications/technical-interface-specifications-for-companies-house-software"),
+        "6.0", new DateOnly(2026, 9, 25), "6C1E4D516B8DAE50E1C34E9B453C5209F6958034CDDB88F1CEB7E5FF331CD05D", "Published-source provenance only");
 
     public static SourceProvenance Ct600V1994 { get; } = new(
         "hmrc-ct600-v3-2026-v1.994", "CT600 V3 (2026) Artefacts",
@@ -39,5 +39,5 @@ public static class CompanyContractCatalog
         new Uri("https://www.frc.org.uk/documents/8907/FRC-2026-Taxonomy-v1.0.0.zip"),
         "1.0.0", new DateOnly(2025, 11, 18), "AE80AE12D9D747AC531150B0051BCD67E7C9ACF44313DA19105B4CC013566462", "Provenance and derived supported-profile catalog only");
 
-    public static IReadOnlyList<SourceProvenance> Sources { get; } = [CompaniesHouseTis59, Ct600V1994, Frc2026];
+    public static IReadOnlyList<SourceProvenance> Sources { get; } = [CompaniesHouseTis60, Ct600V1994, Frc2026];
 }
