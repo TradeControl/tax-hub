@@ -11,17 +11,23 @@ public sealed class CompaniesHouseAccountsController(
     ICompaniesHouseAccountsRunner runner,
     ICompaniesHouseSimulationDiagnostics simulation,
     ICompaniesHouseOfficialTestPreflight officialTestPreflight,
-    ICompaniesHouseOfficialTestSubmission officialTestSubmission) : ControllerBase
+    ICompaniesHouseOfficialTestSubmission officialTestSubmission,
+    ICompaniesHouseOfficialTestStatus officialTestStatus) : ControllerBase
 {
     [HttpPost]
     [Produces("application/xml", "application/json")]
     public Task<IActionResult> Prepare([FromBody] CompaniesHouseAccountsPayload payload,
-        CancellationToken cancellationToken) => Prepare(payload, false, cancellationToken);
+        CancellationToken cancellationToken) => Prepare(payload, false, false, cancellationToken);
 
     [HttpPost("document")]
     [Produces("application/xhtml+xml", "application/json")]
     public Task<IActionResult> PrepareDocument([FromBody] CompaniesHouseAccountsPayload payload,
-        CancellationToken cancellationToken) => Prepare(payload, true, cancellationToken);
+        CancellationToken cancellationToken) => Prepare(payload, true, false, cancellationToken);
+
+    [HttpPost("regenerate-document")]
+    [Produces("application/xhtml+xml", "application/json")]
+    public Task<IActionResult> RegenerateDocument([FromBody] CompaniesHouseAccountsPayload payload,
+        CancellationToken cancellationToken) => Prepare(payload, true, true, cancellationToken);
 
     [HttpPost("simulate")]
     [Produces("application/json")]
@@ -116,8 +122,38 @@ public sealed class CompaniesHouseAccountsController(
         }
     }
 
-    private async Task<IActionResult> Prepare(CompaniesHouseAccountsPayload payload, bool document,
+    [HttpPost("official-test-status-once")]
+    [Produces("application/json")]
+    public async Task<IActionResult> OfficialTestStatusOnce(
+        [FromBody] CompaniesHouseOfficialTestStatusRequest request,
         CancellationToken cancellationToken)
+    {
+        if (!officialTestStatus.Enabled)
+            return NotFound(new { status = "error", code = "OFFICIAL_TEST_STATUS_DISABLED",
+                message = "Companies House official-test status queries are not enabled for this process." });
+        try
+        {
+            return Ok(await officialTestStatus.ExecuteOnceAsync(request, cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { status = "error", code = "OFFICIAL_TEST_STATUS_REQUEST_ERROR",
+                message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnprocessableEntity(new { status = "error", code = "OFFICIAL_TEST_STATUS_EXCHANGE_ERROR",
+                message = exception.Message });
+        }
+        catch (InvalidDataException exception)
+        {
+            return UnprocessableEntity(new { status = "error", code = "OFFICIAL_TEST_STATUS_EVIDENCE_ERROR",
+                message = exception.Message });
+        }
+    }
+
+    private async Task<IActionResult> Prepare(CompaniesHouseAccountsPayload payload, bool document,
+        bool allowTransmissionBlockers, CancellationToken cancellationToken)
     {
         var validation = validator.Validate(payload);
         if (!validation.IsValid)
@@ -126,7 +162,8 @@ public sealed class CompaniesHouseAccountsController(
         {
             var package = await runner.PrepareAsync(payload, cancellationToken);
             var selected = document ? package.Documents.Single().Artifact : package.Transmission;
-            if (package.Transmission.HasErrors || package.Documents.Any(x => x.Artifact.HasErrors))
+            if ((!allowTransmissionBlockers && package.Transmission.HasErrors)
+                || package.Documents.Any(x => x.Artifact.HasErrors))
                 return UnprocessableEntity(new { status = "error", code = "PREPARATION_ERROR", message = "The Companies House package did not pass preparation validation.", details = package.Transmission.Findings.Concat(package.Documents.SelectMany(x => x.Artifact.Findings)) });
 
             Response.Headers.ETag = $"\"{selected.Sha256}\"";
@@ -136,6 +173,11 @@ public sealed class CompaniesHouseAccountsController(
             Response.Headers.Append("X-Companies-House-Contract", package.Transmission.ContractVersion);
             Response.Headers.Append("X-Polling-Mode", package.Polling.Mode.ToString());
             Response.Headers.Append("X-Polling-Path", package.Polling.RelativeStatusPath ?? string.Empty);
+            if (allowTransmissionBlockers)
+            {
+                Response.Headers.Append("X-External-Send", "false");
+                Response.Headers.Append("X-Evidence-Class", "REGENERATED LOCALLY - NOT FILED");
+            }
             var fileName = document ? package.Documents.Single().Name : $"{payload.Filing.SubmissionNumber}-companies-house.xml";
             return File(selected.Content.ToArray(), selected.MediaType, fileName);
         }

@@ -64,10 +64,14 @@ public sealed class CompaniesHouseEnvelopeSerializer
     {
         using var stream = new MemoryStream(xml.ToArray());
         var document = SecureXml.Parse(stream);
-        return document.Descendants(Status + "Status").Select(element => new CompaniesHouseSubmissionStatus(
+        return document.Descendants().Where(element => IsStatusElement(element, "Status"))
+            .Select(element => new CompaniesHouseSubmissionStatus(
             Required(element, "SubmissionNumber"), ParseStatusCode(Required(element, "StatusCode")),
             Optional(element, "CompanyNumber"), Optional(element, "CustomerReference"),
-            element.Descendants(Status + "Reject").Select(reject => new CompaniesHouseError(
+            OptionalNested(element, "Examiner", "Telephone"),
+            OptionalNested(element, "Examiner", "Comment"),
+            element.Descendants().Where(reject => IsStatusElement(reject, "Reject"))
+                .Select(reject => new CompaniesHouseError(
                 Required(reject, "RejectCode"), Required(reject, "Description"), Optional(reject, "InstanceNumber"))).ToArray())).ToArray();
     }
 
@@ -125,9 +129,16 @@ public sealed class CompaniesHouseEnvelopeSerializer
         return new(fileName, "application/xml", bytes, Convert.ToHexString(SHA256.HashData(bytes)));
     }
 
-    private static string Required(XElement parent, string name) => parent.Element(Status + name)?.Value
+    private static bool IsStatusElement(XElement element, string name) =>
+        element.Name.LocalName == name
+        && (element.Name.Namespace == Status || element.Name.Namespace == GovTalk);
+    private static XElement? StatusElement(XElement parent, string name) =>
+        parent.Elements().SingleOrDefault(element => IsStatusElement(element, name));
+    private static string Required(XElement parent, string name) => StatusElement(parent, name)?.Value
         ?? throw new InvalidDataException($"Missing {name}.");
-    private static string? Optional(XElement parent, string name) => parent.Element(Status + name)?.Value;
+    private static string? Optional(XElement parent, string name) => StatusElement(parent, name)?.Value;
+    private static string? OptionalNested(XElement parent, string container, string name) =>
+        StatusElement(parent, container) is { } element ? Optional(element, name) : null;
     private static string? LocalValue(XElement parent, string name) => parent.Descendants()
         .FirstOrDefault(element => element.Name.LocalName == name)?.Value;
     private static string LocalRequired(XElement parent, string name) => LocalValue(parent, name)

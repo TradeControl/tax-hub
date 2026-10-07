@@ -25,6 +25,14 @@ internal static class CompaniesHouseSimulationDiagnosticsTests
         }
 
         var package = Package("S00001");
+        var eventMessage = CompaniesHouseSubmissionEventLog.BuildMessage(
+            package.Documents.Single().Artifact.Content.ToArray(),
+            package.Documents.Single().Artifact.Sha256, "S00001", "2026100600000001",
+            "Acknowledgement", new string('A', 64), new string('B', 64), []);
+        Assert(eventMessage.Contains("DATABASE-DERIVED ACCOUNTS", StringComparison.Ordinal)
+            && eventMessage.Contains("transport credentials excluded", StringComparison.OrdinalIgnoreCase)
+            && !eventMessage.Contains("TESTAUTHENTICATION", StringComparison.Ordinal),
+            "The application event message did not preserve the exact safe accounts payload.");
         var runner = new PreparedRunner(package);
         var diagnostics = new CompaniesHouseSimulationDiagnostics(runner,
             new InProcessCompaniesHouseDiagnosticGatewayFactory());
@@ -164,12 +172,17 @@ internal static class CompaniesHouseSimulationDiagnosticsTests
             {
                 payload.Filing.AuthorizeOfficialTestSubmission = true;
                 var gateway = new AcknowledgingGateway();
+                var submissionEventLog = new RecordingSubmissionEventLog();
                 var officialSubmission = new CompaniesHouseOfficialTestSubmission(
-                    runner, routed, gateway, evidenceRoot);
+                    runner, routed, gateway, submissionEventLog, evidenceRoot);
                 var officialOutcome = await officialSubmission.ExecuteOnceAsync(payload);
                 Assert(officialOutcome.ResponseKind == CompaniesHouseGatewayResponseKind.Acknowledgement.ToString()
                     && officialOutcome.ExternalRequestCount == 1 && !officialOutcome.RetryPermitted
-                    && !officialOutcome.TerminalFilingDecisionReceived && gateway.ExchangeCount == 1,
+                    && !officialOutcome.TerminalFilingDecisionReceived && gateway.ExchangeCount == 1
+                    && officialOutcome.EventLogRecorded && officialOutcome.EventLogCode == "TEST00001"
+                    && submissionEventLog.WriteCount == 1 && !submissionEventLog.IsError
+                    && submissionEventLog.AccountsPayload.Contains("DATABASE-DERIVED ACCOUNTS",
+                        StringComparison.Ordinal),
                     "The controlled official-test boundary did not record exactly one non-terminal send.");
                 var repeatedOutcome = await officialSubmission.ExecuteOnceAsync(payload);
                 Assert(ReferenceEquals(officialOutcome, repeatedOutcome) && gateway.ExchangeCount == 1,
@@ -184,13 +197,88 @@ internal static class CompaniesHouseSimulationDiagnosticsTests
                 Assert(submitAction?.GetCustomAttribute<HttpPostAttribute>()?.Template == "official-test-submit-once"
                     && !new DisabledCompaniesHouseOfficialTestSubmission().Enabled,
                     "The controlled endpoint is absent or its default-disabled implementation is enabled.");
+                var regenerateAction = typeof(CompaniesHouseAccountsController).GetMethod(
+                    nameof(CompaniesHouseAccountsController.RegenerateDocument));
+                Assert(regenerateAction?.GetCustomAttribute<HttpPostAttribute>()?.Template == "regenerate-document",
+                    "The explicit Companies House document-regeneration endpoint is absent.");
+
+                var statusRequest = new CompaniesHouseOfficialTestStatusRequest(
+                    "S00001", "STATUS0001", true);
+                var statusGateway = new PendingStatusGateway();
+                var officialStatus = new CompaniesHouseOfficialTestStatus(
+                    routed, statusGateway, evidenceRoot);
+                var statusOutcome = await officialStatus.ExecuteOnceAsync(statusRequest);
+                Assert(statusOutcome.ResponseKind == CompaniesHouseGatewayResponseKind.SubmissionStatus.ToString()
+                    && statusOutcome.Status == CompaniesHouseSubmissionStatusCode.Pending
+                    && statusOutcome.ExaminerComment == "Pending review of attachment"
+                    && statusOutcome.ExternalRequestCount == 1
+                    && !statusOutcome.RetryPermitted
+                    && !statusOutcome.StatusAcknowledgementRequired
+                    && !statusOutcome.TerminalFilingDecisionReceived
+                    && statusGateway.ExchangeCount == 1,
+                    "The official specific-submission status query did not preserve its safe pending result.");
+                Assert(JsonSerializer.Serialize(statusOutcome).Contains("\"Status\":\"Pending\"",
+                        StringComparison.Ordinal),
+                    "The human-facing status outcome exposed the enum as a numeric implementation value.");
+                Assert(Directory.GetFiles(evidenceRoot, "request.protected.xml", SearchOption.AllDirectories).Length == 2
+                    && Directory.GetFiles(evidenceRoot, "response.xml", SearchOption.AllDirectories).Length == 2
+                    && Directory.GetDirectories(evidenceRoot, "status-STATUS0001", SearchOption.AllDirectories).Length == 1,
+                    "The status query did not retain its protected request and response beside the filing evidence.");
+
+                var restartedGateway = new PendingStatusGateway();
+                var restartedStatus = new CompaniesHouseOfficialTestStatus(
+                    routed, restartedGateway, evidenceRoot);
+                var recoveredStatus = await restartedStatus.ExecuteOnceAsync(statusRequest);
+                Assert(recoveredStatus.SubmissionNumber == statusOutcome.SubmissionNumber
+                    && recoveredStatus.TransactionId == statusOutcome.TransactionId
+                    && recoveredStatus.RequestSha256 == statusOutcome.RequestSha256
+                    && recoveredStatus.ResponseSha256 == statusOutcome.ResponseSha256
+                    && recoveredStatus.Status == statusOutcome.Status
+                    && restartedGateway.ExchangeCount == 0,
+                    "A completed status query was resent instead of being recovered after restart.");
+
+                var filingDirectory = Directory.GetDirectories(evidenceRoot, "*-S00001").Single();
+                var ambiguousDirectory = Path.Combine(filingDirectory, "status-STATUS0002");
+                Directory.CreateDirectory(ambiguousDirectory);
+                await File.WriteAllTextAsync(Path.Combine(ambiguousDirectory, "pre-send.json"),
+                    "{\"TransactionId\":\"STATUS0002\"}");
+                try
+                {
+                    await restartedStatus.ExecuteOnceAsync(new("S00001", "STATUS0002", true));
+                    throw new InvalidOperationException("An ambiguous status query was automatically retried.");
+                }
+                catch (InvalidOperationException exception) when (
+                    exception.Message.Contains("transaction ID remains consumed", StringComparison.Ordinal))
+                {
+                    assertions++;
+                }
+                Assert(restartedGateway.ExchangeCount == 0,
+                    "An ambiguous retained status attempt reached the gateway after restart.");
+
+                try
+                {
+                    await restartedStatus.ExecuteOnceAsync(new("S99999", "STATUS0003", true));
+                    throw new InvalidOperationException("A status query without retained filing evidence was accepted.");
+                }
+                catch (InvalidOperationException exception) when (
+                    exception.Message.Contains("retained filing acknowledgement", StringComparison.Ordinal))
+                {
+                    assertions++;
+                }
+                var statusAction = typeof(CompaniesHouseAccountsController).GetMethod(
+                    nameof(CompaniesHouseAccountsController.OfficialTestStatusOnce));
+                Assert(statusAction?.GetCustomAttribute<HttpPostAttribute>()?.Template == "official-test-status-once"
+                    && !new DisabledCompaniesHouseOfficialTestStatus().Enabled,
+                    "The controlled status endpoint is absent or its disabled implementation is enabled.");
 
                 var unclassifiedRoot = Path.Combine(Path.GetTempPath(),
                     $"tax-hub-ch-unclassified-{Guid.NewGuid():N}");
                 try
                 {
+                    var failureEventLog = new RecordingSubmissionEventLog();
                     var unclassified = new CompaniesHouseOfficialTestSubmission(
-                        runner, routed, new UnclassifiedGateway(), unclassifiedRoot);
+                        runner, routed, new UnclassifiedGateway(), failureEventLog,
+                        unclassifiedRoot);
                     try
                     {
                         await unclassified.ExecuteOnceAsync(payload);
@@ -205,6 +293,10 @@ internal static class CompaniesHouseSimulationDiagnosticsTests
                             && Directory.GetFiles(unclassifiedRoot, "ambiguous-failure.json",
                                 SearchOption.AllDirectories).Length == 1,
                             "The one-shot boundary did not retain its unclassified response evidence.");
+                        Assert(failureEventLog.WriteCount == 1 && failureEventLog.IsError
+                            && exception.Message.Contains("Trade Control event log: TEST00001",
+                                StringComparison.Ordinal),
+                            "The failed official exchange did not create and expose its application error event.");
                     }
                 }
                 finally
@@ -223,6 +315,25 @@ internal static class CompaniesHouseSimulationDiagnosticsTests
             File.Delete(secretFile);
         }
         return assertions;
+    }
+
+    private sealed class RecordingSubmissionEventLog : ICompaniesHouseSubmissionEventLog
+    {
+        public int WriteCount { get; private set; }
+        public bool IsError { get; private set; }
+        public string AccountsPayload { get; private set; } = string.Empty;
+
+        public Task<string> WriteAsync(string sqlConnection, PreparedSubmissionPackage package,
+            string submissionNumber, string transactionId, string responseKind, string requestSha256,
+            string? responseSha256, IReadOnlyList<CompaniesHouseError> errors, bool isError,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            WriteCount++;
+            IsError = isError;
+            AccountsPayload = Encoding.UTF8.GetString(package.Documents.Single().Artifact.Content.ToArray());
+            return Task.FromResult("TEST00001");
+        }
     }
 
     private static PreparedSubmissionPackage Package(string submissionNumber)
@@ -337,6 +448,32 @@ internal static class CompaniesHouseSimulationDiagnosticsTests
                 "The Companies House response does not match the requested operation.",
                 System.Collections.Immutable.ImmutableArray.CreateRange(response), Hash(response),
                 new InvalidDataException("Unclassified test response."));
+        }
+    }
+
+    private sealed class PendingStatusGateway : ICompaniesHouseXmlGatewaySession
+    {
+        public int ExchangeCount { get; private set; }
+        public string EvidenceClass => CompaniesHouseOfficialTestGatewayFactory.OfficialTestEvidence;
+
+        public Task<CompaniesHouseGatewayResponse> ExchangeAsync(CompaniesHouseGatewayRequest request,
+            CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (request.Operation != CompaniesHouseGatewayOperation.GetSubmissionStatus)
+                throw new InvalidOperationException("The status test received a non-status operation.");
+            ExchangeCount++;
+            var response = Encoding.UTF8.GetBytes("""
+                <GovTalkMessage xmlns="http://www.govtalk.gov.uk/CM/envelope">
+                  <EnvelopeVersion>1.0</EnvelopeVersion>
+                  <Header><MessageDetails><Class>GetSubmissionStatus</Class><Qualifier>response</Qualifier><TransactionID>STATUS0001</TransactionID><GatewayTimestamp>2026-10-07T09:00:00Z</GatewayTimestamp></MessageDetails></Header>
+                  <GovTalkDetails/><Body><SubmissionStatus><Status><SubmissionNumber>S00001</SubmissionNumber><StatusCode>PENDING</StatusCode><CompanyNumber>01234567</CompanyNumber><Examiner><Telephone>Fred Blogs</Telephone><Comment>Pending review of attachment</Comment></Examiner></Status></SubmissionStatus></Body>
+                </GovTalkMessage>
+                """);
+            return Task.FromResult(new CompaniesHouseGatewayResponse(
+                CompaniesHouseGatewayResponseKind.SubmissionStatus,
+                System.Collections.Immutable.ImmutableArray.CreateRange(response),
+                Hash(request.Content.AsSpan()), Hash(response), EvidenceClass));
         }
     }
 

@@ -101,6 +101,7 @@ builder.Services.AddSingleton<CompanyAccountsPayloadValidator>();
 builder.Services.AddSingleton<CompanyAccountsRunner>();
 builder.Services.AddSingleton<CompaniesHouseAccountsPayloadValidator>();
 builder.Services.AddSingleton<CompaniesHouseAccountsRunner>();
+builder.Services.AddSingleton<ICompaniesHouseSubmissionEventLog, CompaniesHouseSubmissionEventLog>();
 builder.Services.AddSingleton<ICompaniesHouseAccountsRunner>(sp =>
     sp.GetRequiredService<CompaniesHouseAccountsRunner>());
 builder.Services.AddSingleton<ICompaniesHouseDiagnosticGatewayFactory>(sp =>
@@ -165,6 +166,22 @@ builder.Services.AddSingleton<ICompaniesHouseOfficialTestSubmission>(sp =>
     });
     return new CompaniesHouseOfficialTestSubmission(
         sp.GetRequiredService<ICompaniesHouseAccountsRunner>(), routed,
+        CompaniesHouseOfficialTestGatewayFactory.Create(),
+        sp.GetRequiredService<ICompaniesHouseSubmissionEventLog>(),
+        Path.Combine(protectedRoot, "evidence"));
+});
+builder.Services.AddSingleton<ICompaniesHouseOfficialTestStatus>(sp =>
+{
+    if (!builder.Environment.IsDevelopment()
+        || !builder.Configuration.GetValue<bool>("TaxHub:CompaniesHouse:OfficialTestStatusEnabled"))
+        return new DisabledCompaniesHouseOfficialTestStatus();
+    var contentRoot = sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
+    var protectedRoot = Path.GetFullPath(Path.Combine(contentRoot,
+        "../../../../.local/companies-house/test-account"));
+    var testAccount = new LabelledTextFileSecretProvider(
+        Path.Combine(protectedRoot, "credentials.txt"),
+        CompaniesHouseSecretReferences.TestAccountFileLabels);
+    return new CompaniesHouseOfficialTestStatus(testAccount,
         CompaniesHouseOfficialTestGatewayFactory.Create(),
         Path.Combine(protectedRoot, "evidence"));
 });

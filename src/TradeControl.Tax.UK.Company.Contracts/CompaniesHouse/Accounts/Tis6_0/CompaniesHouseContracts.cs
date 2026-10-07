@@ -29,6 +29,7 @@ public sealed record CompaniesHouseSubmissionStatusRequest(string PresenterId,
 
 public sealed record CompaniesHouseSubmissionStatus(string SubmissionNumber,
     CompaniesHouseSubmissionStatusCode StatusCode, string? CompanyNumber, string? CustomerReference,
+    string? ExaminerTelephone, string? ExaminerComment,
     IReadOnlyList<CompaniesHouseError> Errors);
 
 public sealed record CompaniesHouseStatusAcknowledgement;
