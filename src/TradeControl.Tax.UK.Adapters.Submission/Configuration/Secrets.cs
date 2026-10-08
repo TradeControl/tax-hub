@@ -210,6 +210,11 @@ public static class CompaniesHouseSecretReferences
         new("companies-house-test-package-reference");
     public static SecretReference CompanyAuthentication { get; } =
         new("companies-house-company-authentication");
+    public static SecretReference LivePresenterId { get; } = new("companies-house-live-presenter-id");
+    public static SecretReference LivePresenterAuthentication { get; } =
+        new("companies-house-live-presenter-authentication");
+    public static SecretReference LivePackageReference { get; } =
+        new("companies-house-live-package-reference");
 
     public static IReadOnlyDictionary<SecretReference, string> JsonProperties { get; } =
         new Dictionary<SecretReference, string>
@@ -218,7 +223,10 @@ public static class CompaniesHouseSecretReferences
             [TestPresenterAuthentication] = "testPresenterAuthentication",
             [TestFlag] = "testFlag",
             [TestPackageReference] = "testPackageReference",
-            [CompanyAuthentication] = "companyAuthentication"
+            [CompanyAuthentication] = "companyAuthentication",
+            [LivePresenterId] = "livePresenterId",
+            [LivePresenterAuthentication] = "livePresenterAuthentication",
+            [LivePackageReference] = "livePackageReference"
         };
 
     public static IReadOnlyDictionary<SecretReference, string> TestAccountFileLabels { get; } =
@@ -237,6 +245,9 @@ public static class CompaniesHouseSecretReferences
             [TestPresenterAuthentication] = "TaxHub__CompaniesHouse__TestPresenterAuthentication",
             [TestFlag] = "TaxHub__CompaniesHouse__TestFlag",
             [TestPackageReference] = "TaxHub__CompaniesHouse__TestPackageReference",
-            [CompanyAuthentication] = "TaxHub__CompaniesHouse__CompanyAuthentication"
+            [CompanyAuthentication] = "TaxHub__CompaniesHouse__CompanyAuthentication",
+            [LivePresenterId] = "TaxHub__CompaniesHouse__LivePresenterId",
+            [LivePresenterAuthentication] = "TaxHub__CompaniesHouse__LivePresenterAuthentication",
+            [LivePackageReference] = "TaxHub__CompaniesHouse__LivePackageReference"
         };
 }

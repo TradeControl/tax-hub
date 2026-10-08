@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
 using TradeControl.Tax.UK.Adapters.Submission.Audit;
+using TradeControl.Tax.UK.Adapters.Submission.CompaniesHouse;
 using TradeControl.Tax.UK.Adapters.Submission.Configuration;
 using TradeControl.Tax.UK.Adapters.Submission.FraudPrevention;
 using TradeControl.Tax.UK.Adapters.Submission.OAuth;
@@ -68,6 +69,23 @@ await AssertRejectedAsync(() => Task.Run(() => sandbox.ResolveApiPath("https://e
     "An absolute request-supplied host was accepted.");
 await AssertRejectedAsync(() => Task.Run(() => sandbox.ResolveApiPath("//evil.example/steal")),
     "A scheme-relative request-supplied host was accepted.");
+
+var companyAuthenticationScope = new CompaniesHouseCompanyAuthenticationScope(
+    Guid.NewGuid().ToString(), new string('A', 64));
+Assert(companyAuthenticationScope.CompanyIdentitySha256 == new string('A', 64)
+    && typeof(ICompaniesHouseCompanyAuthenticationResolver).GetMethod("ResolveAsync")?.ReturnType
+        == typeof(ValueTask<ProtectedSecret>),
+    "The Companies House company-authentication boundary is not tenant/company scoped or protected.");
+await AssertRejectedAsync(() => Task.Run(() =>
+        new CompaniesHouseCompanyAuthenticationScope("browser-tenant", new string('A', 64))),
+    "A caller-shaped tenant value was accepted by the Companies House authentication boundary.");
+Assert(CompaniesHouseSecretReferences.AppServiceEnvironmentVariables.Keys.Contains(
+        CompaniesHouseSecretReferences.LivePresenterId)
+    && CompaniesHouseSecretReferences.AppServiceEnvironmentVariables.Keys.Contains(
+        CompaniesHouseSecretReferences.LivePresenterAuthentication)
+    && CompaniesHouseSecretReferences.AppServiceEnvironmentVariables.Keys.Contains(
+        CompaniesHouseSecretReferences.LivePackageReference),
+    "The live presenter/package configuration is not confined to named protected references.");
 
 var root = Path.Combine(Path.GetTempPath(), $"tax-hub-submission-{Guid.NewGuid():N}");
 Directory.CreateDirectory(root);

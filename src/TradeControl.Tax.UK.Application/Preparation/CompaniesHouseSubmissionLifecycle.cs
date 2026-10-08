@@ -16,8 +16,8 @@ public enum CompaniesHouseConversationState
 }
 
 /// <summary>
-/// Safe local evidence produced by the development simulator. Authority evidence is deliberately
-/// excluded until Phase 5.12 defines and validates its durable transport boundary.
+/// Safe local evidence produced by the development simulator. Official gateway evidence uses the
+/// separately classified Submission-adapter exchange records and must never be represented by this type.
 /// </summary>
 public sealed class CompaniesHouseSimulationEvidence
 {
@@ -54,7 +54,7 @@ public sealed class CompaniesHouseSimulationEvidence
 
 /// <summary>
 /// Immutable, transport-neutral state for one Companies House filing conversation. It does not
-/// send, poll, persist or materialise credentials; those remain future adapter responsibilities.
+/// send, poll, persist or materialise credentials; those remain adapter and product-host responsibilities.
 /// </summary>
 public sealed class CompaniesHouseFilingConversation
 {
