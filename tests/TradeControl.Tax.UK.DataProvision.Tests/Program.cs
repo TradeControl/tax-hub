@@ -141,7 +141,7 @@ if (args.Contains("--corporation-tax-loss", StringComparer.OrdinalIgnoreCase))
     _ = await new TcCompanyStatutorySourceReader(factory, connectionString).ReadAsync(new(
         DateOnly.FromDateTime(DateTime.Today), period, null, false,
         new(snapshot.Identity.CompanyNumber, true, true, 0m, null,
-            0m, null, 0m, null, 0m, null, null, null, null, [], [],
+            null, null, null, [], [],
             period.End.AddDays(30), "DIRECTOR-1", "Synthetic Director")));
     Console.WriteLine($"CO4 loss scenario passed: tax=0.00, losses brought forward={expectedLossesBroughtForward:N2}, losses carried forward={expectedLossesCarriedForward:N2}.");
     return;
@@ -195,8 +195,19 @@ if (snapshot.Identity.BusinessTaxTypeCode == 0)
 
     var companySource = await new TcCompanyStatutorySourceReader(factory, connectionString).ReadAsync(
         new(DateOnly.FromDateTime(DateTime.Today), null, null, false,
-            new("12345678", true, true, 0m, 0m, 0m, 0m, 0m, 0m, 0m, 0m,
+            new("12345678", true, true, 0m, 0m,
                 null, null, null, [], [], defaults.Period.Value.End.AddDays(30), "DIRECTOR-1", "Synthetic Director")));
+    var systemControlledPresentationAmounts = new[]
+    {
+        companySource.BalanceSheet.PrepaymentsAndAccruedIncome,
+        companySource.BalanceSheet.Provisions,
+        companySource.BalanceSheet.AccrualsAndDeferredIncome
+    };
+    Assert(systemControlledPresentationAmounts.All(amount =>
+            amount.Current.Value == 0m
+            && amount.Current.State == StatutoryValueState.Derived
+            && amount.Comparative is { Value: 0m, State: StatutoryValueState.Derived }),
+        "Separate balance-sheet presentation lines were not kept system-derived and bridge-preserving.");
     var projectedIncome = await new TcBusinessTaxReader(factory).ReadCumulativeAsync(
         connectionString, "UK-CO-ACCTS-2026",
         companySource.Periods.Current.Start.ToDateTime(TimeOnly.MinValue),

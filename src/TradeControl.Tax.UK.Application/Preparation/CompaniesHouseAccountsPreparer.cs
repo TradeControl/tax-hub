@@ -38,10 +38,8 @@ public sealed class CompaniesHouseAccountsPreparer
                 value.Severity == ValidationSeverity.Error ? PreparedFindingSeverity.Error : PreparedFindingSeverity.Warning,
                 value.Code, value.Message, value.Path)).Concat(
             [
-                new(PreparedFindingSeverity.Error, "CH-PENDING-CREDENTIALS",
-                    "Presenter credentials, company authentication and the allocated package reference remain transport-time inputs."),
-                new(PreparedFindingSeverity.Error, "CH-PENDING-DEVELOPER-TEST",
-                    "Companies House developer-test acceptance evidence is pending; this preview must not be dispatched.")
+                new(PreparedFindingSeverity.Warning, "CH-TRANSPORT-MATERIALISATION-REQUIRED",
+                    "This retained review package deliberately excludes its final submission identity, presenter credentials, company authentication and the live package reference. It cannot be dispatched until those protected transport-time inputs are materialised.")
             ]);
         var transmission = new CompaniesHouseEnvelopeSerializer().Serialize(filing);
         var transmissionArtifact = PreparedStatutoryArtifact.Create(

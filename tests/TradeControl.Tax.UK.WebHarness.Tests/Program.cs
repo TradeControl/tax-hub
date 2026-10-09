@@ -18,6 +18,7 @@ using TradeControl.Tax.UK.Adapters.Submission.OAuth;
 using TradeControl.Tax.UK.Application.Preparation;
 using TradeControl.Tax.UK.Hmrc.Vat;
 using TradeControl.Tax.UK.WebHarness.Controllers;
+using TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Hmrc;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Preparation;
 
@@ -45,6 +46,31 @@ PreparedApiRequest ReconciliableVatRequest()
         [new("vrn", "123456789")], serializeBody: () => body,
         sourceEvidence: [new("TradeControl", "Cash.vwTaxVatSubmission", "0x00000001")]);
 }
+
+var balanceOverridePayload = new CompanyAccountsPayload
+{
+    SqlConnection = "Server=(local);Database=synthetic;Integrated Security=true;TrustServerCertificate=true",
+    Pilot = "company-accounts",
+    Review = new()
+    {
+        PrepaymentsAndAccruedIncome = 1m,
+        ApprovedOn = new DateOnly(2026, 10, 8),
+        SigningDirectorCode = "DIRECTOR-1",
+        SigningDirectorName = "Synthetic Director"
+    }
+};
+Assert(new CompanyAccountsPayloadValidator().Validate(balanceOverridePayload).Errors
+        .ContainsKey("review.balanceSheetAllocations"),
+    "The diagnostic company-accounts boundary accepted a non-zero balance-sheet override.");
+var corporationTaxOverridePayload = new CorporationTaxPayload
+{
+    SqlConnection = balanceOverridePayload.SqlConnection,
+    Pilot = "corporation-tax",
+    Accounts = new() { Provisions = 1m }
+};
+Assert(new CorporationTaxPayloadValidator().Validate(corporationTaxOverridePayload).Errors
+        .ContainsKey("accounts.balanceSheetAllocations"),
+    "The diagnostic Corporation Tax boundary accepted a non-zero accounts balance-sheet override.");
 
 var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero));
 var store = new PreparedApiRequestStore(new(2, TimeSpan.FromMinutes(5)), time);

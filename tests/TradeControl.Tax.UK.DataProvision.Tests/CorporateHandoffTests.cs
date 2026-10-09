@@ -49,9 +49,11 @@ internal static class CorporateHandoffTests
     private static async Task AssertCompaniesHouseGateAsync(PreparedSubmissionPackage package)
     {
         Assert(package.Transmission.Status == PreparedArtifactStatus.Preview
-            && package.Transmission.Findings.Any(x => x.Code == "CH-PENDING-CREDENTIALS")
-            && package.Transmission.Findings.Any(x => x.Code == "CH-PENDING-DEVELOPER-TEST"),
-            "Companies House pending credential and developer-test gates are not explicit.");
+            && package.Transmission.Findings.Any(x =>
+                x.Code == "CH-TRANSPORT-MATERIALISATION-REQUIRED"
+                && x.Severity == PreparedFindingSeverity.Warning)
+            && package.Transmission.Findings.All(x => x.Code != "CH-PENDING-DEVELOPER-TEST"),
+            "The Companies House preview does not preserve the protected transport-time boundary or still claims that accepted developer testing is pending.");
         var gateway = new RecordingCompaniesHouseGateway();
         var context = new AuthorityDispatchContext("tenant-ch", "principal-ch", "actor-ch", "approval-ch", "facts-ch");
         try

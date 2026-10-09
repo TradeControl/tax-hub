@@ -25,9 +25,7 @@ public sealed class CompaniesHouseAccountsRunner(
             payload.AsOfDate ?? DateOnly.FromDateTime(DateTime.Today), payload.Period, payload.ComparativePeriod,
             payload.IsFirstAccountsPeriod,
             new(review.CompanyNumber, review.MembersHaveNotRequiredAudit, review.DirectorsAcknowledgeResponsibilities,
-                0m, null, review.PrepaymentsAndAccruedIncome,
-                review.ComparativePrepaymentsAndAccruedIncome, review.Provisions, review.ComparativeProvisions,
-                review.AccrualsAndDeferredIncome, review.ComparativeAccrualsAndDeferredIncome,
+                0m, null,
                 review.PrincipalActivity, review.AccountingPolicies, review.AverageEmployees,
                 review.DirectorAdvances, review.CommitmentsAndContingencies, review.ApprovedOn,
                 review.SigningDirectorCode, review.SigningDirectorName));

@@ -75,11 +75,12 @@ Assert(ixXml.Descendants(ix + "nonNumeric")
         .Where(x => fixedConcepts.Contains(x.Attribute("name")?.Value ?? string.Empty))
         .All(x => x.Attribute(XNamespace.Xml + "lang") is null && string.IsNullOrEmpty(x.Value)),
     "A zero-length FRC fixedItemType fact carries text or xml:lang.");
-Assert(Encoding.UTF8.GetString(fullIx.Content).Contains("120000", StringComparison.Ordinal), "Displayed turnover is absent from full accounts.");
-Assert(!Encoding.UTF8.GetString(filletedIx.Content).Contains("120000", StringComparison.Ordinal), "Filleted accounts expose turnover.");
+Assert(Encoding.UTF8.GetString(fullIx.Content).Contains("120,000.00", StringComparison.Ordinal), "Displayed turnover is absent from full accounts.");
+Assert(!Encoding.UTF8.GetString(filletedIx.Content).Contains("120,000.00", StringComparison.Ordinal), "Filleted accounts expose turnover.");
 var filletedXml = XDocument.Parse(Encoding.UTF8.GetString(filletedIx.Content));
 var filletedText = filletedXml.Root!.Value;
 XNamespace xhtml = "http://www.w3.org/1999/xhtml";
+XNamespace ixt = "http://www.xbrl.org/inlineXBRL/transformation/2020-02-12";
 Assert(!filletedXml.Descendants().Any(element => element.Name.Namespace == xhtml
         && element.Name.LocalName is "main" or "section")
     && filletedXml.Descendants(xhtml + "style").Single().Attribute("type")?.Value == "text/css",
@@ -89,6 +90,42 @@ Assert(filletedText.Contains("Balance sheet as at", StringComparison.Ordinal)
     && filletedText.Contains("Creditors: amounts falling due within one year", StringComparison.Ordinal)
     && filletedText.Contains("Capital and reserves", StringComparison.Ordinal),
     "Filleted iXBRL is not presented as a recognisable statutory balance sheet.");
+Assert(filletedText.Contains("Accounts status: Unaudited — audit exempt, no accountants' report",
+           StringComparison.Ordinal)
+       && filletedText.Contains("Accounts type: Filleted accounts", StringComparison.Ordinal)
+       && filletedText.Contains("Accounting standard: FRS 105 micro-entities", StringComparison.Ordinal)
+       && filletedText.Contains("Trading status: Trading", StringComparison.Ordinal)
+       && filletedText.Contains("Dormant company: false", StringComparison.Ordinal),
+    "The filing-profile classifications are not intelligible in the human-readable accounts.");
+Assert(filletedXml.Descendants(ix + "nonNumeric")
+        .Where(x => fixedConcepts.Contains(x.Attribute("name")?.Value ?? string.Empty))
+        .All(x => x.Attribute(XNamespace.Xml + "lang") is null && string.IsNullOrEmpty(x.Value)),
+    "Human-readable classifications changed the accepted fixedItemType XBRL facts.");
+Assert(filletedXml.Root.GetNamespaceOfPrefix("ixt") == ixt
+    && filletedXml.Descendants(xhtml + "th").Any(x => x.Value == "2026 £'s")
+    && filletedXml.Descendants(xhtml + "th").Any(x => x.Value == "2025 £'s"),
+    "The statutory accounts headings do not identify the sterling presentation unit.");
+Assert(filletedXml.Descendants(ix + "nonFraction")
+        .Where(x => x.Attribute("unitRef")?.Value is not null)
+        .Any(x => x.Value == "35,000.00" && x.Attribute("format")?.Value == "ixt:num-dot-decimal"),
+    "Monetary facts are not displayed with accounting separators and two decimal places.");
+var currentAssetsConcept = taxonomy["CurrentAssets"].Name;
+var negativePresentationReport = fullReport with
+{
+    Facts = fullReport.Facts.Select(fact => fact.Concept == currentAssetsConcept
+            && fact.Context.Period is XbrlPeriod.Instant { Date: var date }
+            && date == accounts.Period.End
+        ? fact with { Value = new XbrlValue.Monetary(-35000.5m) }
+        : fact).ToArray()
+};
+var negativePresentationXml = XDocument.Parse(Encoding.UTF8.GetString(
+    ixBuilder.Build(negativePresentationReport, "negative-presentation.html").Content));
+var negativePresentedFact = negativePresentationXml.Descendants(ix + "nonFraction")
+    .Single(x => x.Attribute("name")?.Value == "core:CurrentAssets" && x.Attribute("sign")?.Value == "-");
+Assert(negativePresentedFact.Value == "35,000.50"
+    && negativePresentedFact.Attribute("format")?.Value == "ixt:num-dot-decimal"
+    && negativePresentedFact.Parent?.Value == "(35,000.50)",
+    "Negative monetary facts are not displayed in brackets while preserving the iXBRL sign.");
 Assert(filletedText.Contains("Jane Director", StringComparison.Ordinal)
     && filletedText.Contains("These accounts have been prepared in accordance with the micro-entity provisions.", StringComparison.Ordinal),
     "The visible accounts omit their approval or statutory statements.");

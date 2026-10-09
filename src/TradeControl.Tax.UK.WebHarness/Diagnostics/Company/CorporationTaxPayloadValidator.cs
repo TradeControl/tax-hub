@@ -40,6 +40,14 @@ public sealed class CorporationTaxPayloadValidator
         if (string.IsNullOrWhiteSpace(payload.Accounts.SigningDirectorName))
             Add("accounts.signingDirectorName", "The signing-director name is required.");
         if (payload.Accounts.AverageEmployees < 0) Add("accounts.averageEmployees", "Average employees cannot be negative.");
+        if (payload.Accounts.PrepaymentsAndAccruedIncome != 0m
+            || payload.Accounts.ComparativePrepaymentsAndAccruedIncome is not (null or 0m)
+            || payload.Accounts.Provisions != 0m
+            || payload.Accounts.ComparativeProvisions is not (null or 0m)
+            || payload.Accounts.AccrualsAndDeferredIncome != 0m
+            || payload.Accounts.ComparativeAccrualsAndDeferredIncome is not (null or 0m))
+            Add("accounts.balanceSheetAllocations",
+                "Balance-sheet allocations are derived from Trade Control accounting evidence and cannot be overridden.");
         foreach (var (advance, index) in payload.Accounts.DirectorAdvances.Select((value, index) => (value, index)))
             if (advance.OpeningBalance + advance.Advances - advance.Repayments != advance.ClosingBalance)
                 Add($"accounts.directorAdvances[{index}].closingBalance", "The director advance does not reconcile.");

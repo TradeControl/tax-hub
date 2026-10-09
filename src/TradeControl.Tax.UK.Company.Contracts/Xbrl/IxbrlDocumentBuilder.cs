@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Security.Cryptography;
 using System.Text;
 using System.Xml;
@@ -13,6 +14,7 @@ public sealed class IxbrlDocumentBuilder
     private static readonly XNamespace Xbrldi = "http://xbrl.org/2006/xbrldi";
     private static readonly XNamespace Link = "http://www.xbrl.org/2003/linkbase";
     private static readonly XNamespace Xlink = "http://www.w3.org/1999/xlink";
+    private static readonly XNamespace Ixt = "http://www.xbrl.org/inlineXBRL/transformation/2020-02-12";
 
     public DocumentArtifact Build(IxbrlReport report, string fileName)
     {
@@ -41,6 +43,7 @@ public sealed class IxbrlDocumentBuilder
                 new XAttribute(XNamespace.Xmlns + "xbrldi", Xbrldi),
                 new XAttribute(XNamespace.Xmlns + "link", Link),
                 new XAttribute(XNamespace.Xmlns + "xlink", Xlink),
+                new XAttribute(XNamespace.Xmlns + "ixt", Ixt),
                 new XAttribute(XNamespace.Xmlns + "core", Frc2026Catalog.CoreNamespace),
                 new XAttribute(XNamespace.Xmlns + "bus", Frc2026Catalog.BusinessNamespace),
                 new XAttribute(XNamespace.Xmlns + "direp", Frc2026Catalog.DirectorsReportNamespace),
@@ -78,6 +81,21 @@ public sealed class IxbrlDocumentBuilder
             var fact = Find(key, predicate);
             return fact is null ? string.Empty : render(fact);
         }
+        object TaggedAmount(string key, Func<XbrlFact, bool>? predicate = null)
+        {
+            var fact = Find(key, predicate);
+            if (fact is null) return string.Empty;
+
+            var element = render(fact);
+            if (fact.Value is not XbrlValue.Monetary monetary) return element;
+
+            element.Value = Math.Abs(monetary.Value).ToString("#,##0.00", CultureInfo.InvariantCulture);
+            element.Add(new XAttribute("format", "ixt:num-dot-decimal"));
+            if (monetary.Value >= 0) return element;
+
+            element.Add(new XAttribute("sign", "-"));
+            return new object[] { "(", element, ")" };
+        }
         static bool InstantOn(XbrlFact fact, DateOnly date) => fact.Context.Period is XbrlPeriod.Instant instant && instant.Date == date;
         static bool DurationEndingOn(XbrlFact fact, DateOnly date) => fact.Context.Period is XbrlPeriod.Duration duration && duration.End == date;
 
@@ -92,13 +110,38 @@ public sealed class IxbrlDocumentBuilder
         XElement BalanceRow(string label, string key, bool total = false) =>
             new(Xhtml + "tr", total ? new XAttribute("class", "total") : null,
                 new XElement(Xhtml + "td", label),
-                new XElement(Xhtml + "td", Tagged(key, x => InstantOn(x, currentDate))),
-                comparativeDate is null ? null : new XElement(Xhtml + "td", Tagged(key, x => InstantOn(x, comparativeDate.Value))));
+                new XElement(Xhtml + "td", TaggedAmount(key, x => InstantOn(x, currentDate))),
+                comparativeDate is null ? null : new XElement(Xhtml + "td", TaggedAmount(key, x => InstantOn(x, comparativeDate.Value))));
         XElement IncomeRow(string label, string key, bool total = false) =>
             new(Xhtml + "tr", total ? new XAttribute("class", "total") : null,
                 new XElement(Xhtml + "td", label),
-                new XElement(Xhtml + "td", Tagged(key, x => DurationEndingOn(x, currentDate))),
-                comparativeDate is null ? null : new XElement(Xhtml + "td", Tagged(key, x => DurationEndingOn(x, comparativeDate.Value))));
+                new XElement(Xhtml + "td", TaggedAmount(key, x => DurationEndingOn(x, currentDate))),
+                comparativeDate is null ? null : new XElement(Xhtml + "td", TaggedAmount(key, x => DurationEndingOn(x, comparativeDate.Value))));
+        XElement FilingClassification(string label, string key, string dimension, string defaultValue)
+        {
+            var fact = Find(key);
+            if (fact is null) return new XElement(Xhtml + "li", label, ": unavailable");
+
+            var member = fact.Context.Dimensions?
+                .FirstOrDefault(item => item.Dimension.LocalName == dimension)?.Member.LocalName;
+            var display = (dimension, member) switch
+            {
+                ("AccountsStatusDimension", "AuditExempt-NoAccountantsReport") =>
+                    "Unaudited — audit exempt, no accountants' report",
+                ("AccountsTypeDimension", "FilletedAccounts") => "Filleted accounts",
+                ("AccountsTypeDimension", "FullAccounts") => "Full accounts",
+                ("AccountingStandardsDimension", "Micro-entities") => "FRS 105 micro-entities",
+                ("EntityTradingStatusDimension", "EntityHasNeverTraded") => "Never traded",
+                ("EntityTradingStatusDimension", "EntityNoLongerTradingButTradedInPast") =>
+                    "No longer trading",
+                _ => defaultValue
+            };
+
+            // FRC fixedItemType facts have a deliberately empty fact body: their value is carried
+            // by the context dimension (or its published default). Keep the fact unchanged and add
+            // a human-readable interpretation alongside it.
+            return new XElement(Xhtml + "li", label, ": ", render(fact), display);
+        }
 
         var companyName = Tagged("CompanyName");
         var companyNumber = Tagged("CompanyNumber");
@@ -112,8 +155,9 @@ public sealed class IxbrlDocumentBuilder
             new XElement(Xhtml + "h2", "Balance sheet as at ", balanceSheetDate),
             new XElement(Xhtml + "table", new XAttribute("class", "accounts"),
                 new XElement(Xhtml + "thead", new XElement(Xhtml + "tr",
-                    new XElement(Xhtml + "th", string.Empty), new XElement(Xhtml + "th", currentDate.Year),
-                    comparativeDate is null ? null : new XElement(Xhtml + "th", comparativeDate.Value.Year))),
+                    new XElement(Xhtml + "th", string.Empty),
+                    new XElement(Xhtml + "th", currentDate.Year, " ", CurrencyUnitLabel(presentation.Currency)),
+                    comparativeDate is null ? null : new XElement(Xhtml + "th", comparativeDate.Value.Year, " ", CurrencyUnitLabel(presentation.Currency)))),
                 new XElement(Xhtml + "tbody",
                     BalanceRow("Fixed assets", "FixedAssets"),
                     BalanceRow("Current assets", "CurrentAssets"),
@@ -148,10 +192,23 @@ public sealed class IxbrlDocumentBuilder
             new XElement(Xhtml + "p", "Approved by the board on ", Tagged("AccountsApprovedOn")),
             new XElement(Xhtml + "p", Tagged("DirectorSigning"), presentation.SigningDirectorName, ", Director")));
 
-        var metadata = new[] { "PeriodStart", "PeriodEnd", "AccountsStatus", "AccountsType", "AccountingStandards", "TradingStatus", "DormantStatus" }
-            .Select(key => new XElement(Xhtml + "li", key, ": ", Tagged(key))).ToArray();
+        var metadata = new[]
+        {
+            new XElement(Xhtml + "li", "Period start: ", Tagged("PeriodStart")),
+            new XElement(Xhtml + "li", "Period end: ", Tagged("PeriodEnd")),
+            FilingClassification("Accounts status", "AccountsStatus", "AccountsStatusDimension",
+                "Supported unaudited accounts profile"),
+            FilingClassification("Accounts type", "AccountsType", "AccountsTypeDimension",
+                presentation.Filleted ? "Filleted accounts" : "Full accounts"),
+            FilingClassification("Accounting standard", "AccountingStandards", "AccountingStandardsDimension",
+                "FRS 105 micro-entities"),
+            FilingClassification("Trading status", "TradingStatus", "EntityTradingStatusDimension", "Trading"),
+            new XElement(Xhtml + "li", "Dormant company: ", Tagged("DormantStatus"))
+        };
         content.Add(new XElement(Xhtml + "div", new XAttribute("class", "filing-information"),
-            new XElement(Xhtml + "h2", "Accounts information"), new XElement(Xhtml + "ul", metadata)));
+            new XElement(Xhtml + "h2", "Accounts information"),
+            new XElement(Xhtml + "p", "These classifications are derived from the supported filing profile and encoded in the XBRL contexts."),
+            new XElement(Xhtml + "ul", metadata)));
         var remaining = facts.Where(x => !used.Contains(x)).ToArray();
         if (remaining.Length > 0)
             content.Add(new XElement(Xhtml + "div", new XAttribute("class", "filing-information"),
@@ -202,6 +259,12 @@ public sealed class IxbrlDocumentBuilder
     };
 
     private const string CorporationTaxComputationNamespace = "http://www.hmrc.gov.uk/ct/comp/2025-01-01";
+
+    private static string CurrencyUnitLabel(string currency) => currency.ToUpperInvariant() switch
+    {
+        "GBP" => "£'s",
+        _ => currency.ToUpperInvariant()
+    };
 
     private static string ContextKey(XbrlContext x) => $"{x.EntityScheme}|{x.EntityIdentifier}|{x.Period}";
 }

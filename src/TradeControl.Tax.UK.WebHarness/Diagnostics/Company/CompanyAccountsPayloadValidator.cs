@@ -48,6 +48,14 @@ public sealed class CompanyAccountsPayloadValidator
             Add("review.signingDirectorName", "The reviewed signing-director name is required.");
         if (payload.Review.AverageEmployees < 0)
             Add("review.averageEmployees", "Average employees cannot be negative.");
+        if (payload.Review.PrepaymentsAndAccruedIncome != 0m
+            || payload.Review.ComparativePrepaymentsAndAccruedIncome is not (null or 0m)
+            || payload.Review.Provisions != 0m
+            || payload.Review.ComparativeProvisions is not (null or 0m)
+            || payload.Review.AccrualsAndDeferredIncome != 0m
+            || payload.Review.ComparativeAccrualsAndDeferredIncome is not (null or 0m))
+            Add("review.balanceSheetAllocations",
+                "Balance-sheet allocations are derived from Trade Control accounting evidence and cannot be overridden.");
         foreach (var (advance, index) in payload.Review.DirectorAdvances.Select((value, index) => (value, index)))
             if (advance.OpeningBalance + advance.Advances - advance.Repayments != advance.ClosingBalance)
                 Add($"review.directorAdvances[{index}].closingBalance", "The director advance does not reconcile.");

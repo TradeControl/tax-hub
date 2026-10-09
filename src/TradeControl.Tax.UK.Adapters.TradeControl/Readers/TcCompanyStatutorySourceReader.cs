@@ -104,12 +104,12 @@ public sealed class TcCompanyStatutorySourceReader : ICompanyStatutorySource
         var currentAssets = Pair(CB("BalanceSheet.CurrentAssets"), PB("BalanceSheet.CurrentAssets"), currentBalance.Versions, comparativeBalance?.Versions);
         var creditorsWithin = Pair(CB("BalanceSheet.CreditorsDueWithinOneYear"), PB("BalanceSheet.CreditorsDueWithinOneYear"), currentBalance.Versions, comparativeBalance?.Versions);
         var creditorsAfter = Pair(CB("BalanceSheet.CreditorsDueAfterOneYear"), PB("BalanceSheet.CreditorsDueAfterOneYear"), currentBalance.Versions, comparativeBalance?.Versions);
-        var prepayments = ReviewedPair(reviewed.PrepaymentsAndAccruedIncome,
-            comparative is null ? null : reviewed.ComparativePrepaymentsAndAccruedIncome ?? 0m);
-        var provisions = ReviewedPair(reviewed.Provisions,
-            comparative is null ? null : reviewed.ComparativeProvisions ?? 0m);
-        var accruals = ReviewedPair(reviewed.AccrualsAndDeferredIncome,
-            comparative is null ? null : reviewed.ComparativeAccrualsAndDeferredIncome ?? 0m);
+        // Trade Control's native balances already include prepayments, accruals and provisions.
+        // The current filing profile does not split them into extra statement lines: doing so from
+        // an operator-entered value would count the same accounting fact twice and break the bridge.
+        var prepayments = DerivedPair(0m, comparative is null ? null : 0m);
+        var provisions = DerivedPair(0m, comparative is null ? null : 0m);
+        var accruals = DerivedPair(0m, comparative is null ? null : 0m);
         var netCurrent = DerivedPair(currentAssets.Current.Value + prepayments.Current.Value - creditorsWithin.Current.Value,
             comparative is null ? null : currentAssets.Comparative!.Value + prepayments.Comparative!.Value - creditorsWithin.Comparative!.Value);
         var totalAssets = DerivedPair(fixedAssets.Current.Value + netCurrent.Current.Value,

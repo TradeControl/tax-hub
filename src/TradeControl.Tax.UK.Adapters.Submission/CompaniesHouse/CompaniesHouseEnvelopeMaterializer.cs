@@ -37,7 +37,8 @@ public sealed class CompaniesHouseEnvelopeMaterializer(ISecretProvider secrets)
     private static readonly HashSet<string> PermittedPreviewBlockers = new(StringComparer.Ordinal)
     {
         "CH-PENDING-CREDENTIALS",
-        "CH-PENDING-DEVELOPER-TEST"
+        "CH-PENDING-DEVELOPER-TEST",
+        "CH-TRANSPORT-MATERIALISATION-REQUIRED"
     };
 
     public async Task<CompaniesHouseMaterializedEnvelope> MaterializeTestAsync(

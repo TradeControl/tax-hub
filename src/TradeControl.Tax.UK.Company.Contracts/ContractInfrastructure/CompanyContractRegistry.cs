@@ -14,7 +14,7 @@ public static class CompanyContractRegistry
     public static VersionedContract CompaniesHouseAccountsTis60 { get; } = new(
         "companies-house-accounts", "TIS-6.0", new DateOnly(2026, 9, 25), null,
         ContractStatus.Production, false,
-        "Published TIS 6.0 and live GovTalk schemas are modelled; presenter credentials, company authentication and developer-test acceptance remain pending.");
+        "Published TIS 6.0 and live GovTalk schemas are modelled and officially tested for the supported profile; protected transport-time values remain outside prepared artifacts.");
 
     public static VersionedContract CompaniesHouseReplacement { get; } = new(
         "companies-house-accounts", "future-api", new DateOnly(2028, 1, 1), null,
