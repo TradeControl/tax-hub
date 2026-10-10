@@ -342,6 +342,41 @@ AssertRejected(() => describer.Describe(new DescribeIncomeTaxObligations(
         "QQ123456C", Status: "Unknown")),
     "An invalid Income Tax obligation status was accepted.");
 
+var balanceDate = new DateOnly(2026, 9, 30);
+var balanceItems = new[]
+{
+    new SubjectBalanceEvidenceItem("SUPPLIER", "Example Supplier", 40m, -40m,
+        SubjectBalanceEvidencePosition.Creditor),
+    new SubjectBalanceEvidenceItem("CUSTOMER", "Example Customer", -100m, 100m,
+        SubjectBalanceEvidencePosition.Debtor)
+};
+var balanceSource = new SubjectBalanceEvidenceSourceSummary(1, 1, 100m, 40m);
+var balanceSnapshot = SubjectBalanceEvidenceSnapshot.Create(balanceDate, balanceItems, balanceSource);
+var reorderedBalanceSnapshot = SubjectBalanceEvidenceSnapshot.Create(balanceDate,
+    balanceItems.Reverse(), balanceSource);
+Assert(balanceSnapshot.DebtorTotal == 100m && balanceSnapshot.CreditorTotal == 40m
+    && balanceSnapshot.NetBusinessBalance == 60m
+    && balanceSnapshot.Reconciliation.IsReconciled,
+    "The year-end Subject evidence lost its gross populations or reconciliation state.");
+Assert(balanceSnapshot.Subjects.Select(item => item.SubjectCode).SequenceEqual(["CUSTOMER", "SUPPLIER"])
+    && balanceSnapshot.Sha256 == reorderedBalanceSnapshot.Sha256
+    && balanceSnapshot.Sha256.Length == 64,
+    "The Subject evidence digest is not deterministic across source ordering.");
+var changedBalanceSnapshot = SubjectBalanceEvidenceSnapshot.Create(balanceDate,
+    [balanceItems[0], balanceItems[1] with { NativeStatementBalance = -100.01m, BusinessBalance = 100.01m }],
+    balanceSource with { DebtorTotal = 100.01m });
+Assert(changedBalanceSnapshot.Sha256 != balanceSnapshot.Sha256,
+    "A relevant Subject statement change did not invalidate the evidence digest.");
+var changedDuringRead = SubjectBalanceEvidenceSnapshot.Create(balanceDate, balanceItems,
+    balanceSource with { DebtorTotal = 101m });
+Assert(!changedDuringRead.Reconciliation.IsReconciled
+    && changedDuringRead.Reconciliation.DebtorResidual == 1m,
+    "A changed source population was not exposed as an unreconciled snapshot.");
+AssertRejected(() => SubjectBalanceEvidenceSnapshot.Create(balanceDate,
+        [balanceItems[1] with { BusinessBalance = -100m }],
+        new SubjectBalanceEvidenceSourceSummary(1, 0, 100m, 0m)),
+    "A Subject balance with the wrong business polarity was accepted.");
+
 Console.WriteLine($"Application source vocabulary tests passed ({assertions} assertions)." );
 
 static VatReturnSource ReadVatFixture()
