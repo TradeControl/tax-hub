@@ -95,6 +95,23 @@ internal static class CompaniesHouseMaterializerTests
                 "TradeControl.Tax.UK.CompaniesHouse.Accounts.Tis6_0.CompaniesHouseTransportInputs") is null,
             "Raw Companies House credentials remain available through an ordinary record type.");
 
+        var reviewPreview = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(package.Transmission.Content.AsSpan())
+            .Replace(">S00001<", ">000000<", StringComparison.Ordinal));
+        var reviewPreviewSha = Convert.ToHexString(SHA256.HashData(reviewPreview));
+        var retainedAccounts = package.Documents.Single().Artifact;
+        var retainedMaterialized = await new CompaniesHouseEnvelopeMaterializer(provider)
+            .MaterializeRetainedTestAsync(reviewPreview, reviewPreviewSha,
+                retainedAccounts.Content.ToArray(), retainedAccounts.Sha256,
+                "S00017", "2026101200000017");
+        var retainedXml = XDocument.Parse(Encoding.UTF8.GetString(retainedMaterialized.Content.AsSpan()));
+        Assert(retainedMaterialized.PreviewSha256 == reviewPreviewSha
+            && retainedMaterialized.AccountsSha256 == retainedAccounts.Sha256
+            && retainedXml.Descendants(form + "SubmissionNumber").Single().Value == "S00017"
+            && retainedXml.Descendants(govTalk + "TransactionID").Single().Value == "2026101200000017"
+            && Convert.FromBase64String(retainedXml.Descendants(form + "Data").Single().Value)
+                .AsSpan().SequenceEqual(retainedAccounts.Content.AsSpan()),
+            "Retained approved evidence did not materialise with only transport-owned identity and credentials changed.");
+
         var statusRequest = await new CompaniesHouseEnvelopeMaterializer(provider)
             .MaterializeStatusRequestTestAsync(CompaniesHouseStatusQueryScope.Submission,
                 "2026100600000003", submissionNumber: "S00001");

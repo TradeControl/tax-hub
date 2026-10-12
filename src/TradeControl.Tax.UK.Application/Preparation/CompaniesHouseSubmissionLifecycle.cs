@@ -5,14 +5,15 @@ namespace TradeControl.Tax.UK.Application.Preparation;
 
 public enum CompaniesHouseConversationState
 {
-    Prepared,
-    Acknowledged,
-    GatewayRejected,
-    Pending,
-    Parked,
-    Accepted,
-    Rejected,
-    InternalFailure
+    Prepared = 0,
+    Acknowledged = 1,
+    GatewayRejected = 2,
+    Pending = 3,
+    Parked = 4,
+    Accepted = 5,
+    Rejected = 6,
+    InternalFailure = 7,
+    Dispatching = 8
 }
 
 /// <summary>

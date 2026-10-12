@@ -114,6 +114,92 @@ public sealed class CompaniesHouseEnvelopeMaterializer(ISecretProvider secrets)
             CompaniesHouseMaterializedEnvelope.MaterializedEvidence);
     }
 
+    public async Task<CompaniesHouseMaterializedEnvelope> MaterializeRetainedTestAsync(
+        ReadOnlyMemory<byte> previewContent,
+        string previewSha256,
+        ReadOnlyMemory<byte> accountsContent,
+        string accountsSha256,
+        string submissionNumber,
+        string transactionId,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        ValidateTransactionId(transactionId);
+        if (previewContent.IsEmpty || accountsContent.IsEmpty
+            || !IsSha256(previewSha256) || !IsSha256(accountsSha256)
+            || !string.Equals(Convert.ToHexString(SHA256.HashData(previewContent.Span)), previewSha256,
+                StringComparison.Ordinal)
+            || !string.Equals(Convert.ToHexString(SHA256.HashData(accountsContent.Span)), accountsSha256,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException("The retained Companies House evidence failed digest verification.");
+        if (submissionNumber.Length != 6 || submissionNumber.Any(value => !char.IsAsciiLetterOrDigit(value)))
+            throw new ArgumentException("A six-character Companies House submission number is required.",
+                nameof(submissionNumber));
+
+        using var presenterId = await secrets.ResolveAsync(
+            CompaniesHouseSecretReferences.TestPresenterId, cancellationToken);
+        using var presenterAuthentication = await secrets.ResolveAsync(
+            CompaniesHouseSecretReferences.TestPresenterAuthentication, cancellationToken);
+        using var testFlagSecret = await secrets.ResolveAsync(
+            CompaniesHouseSecretReferences.TestFlag, cancellationToken);
+        using var packageReferenceSecret = await secrets.ResolveAsync(
+            CompaniesHouseSecretReferences.TestPackageReference, cancellationToken);
+        using var companyAuthenticationSecret = await secrets.ResolveAsync(
+            CompaniesHouseSecretReferences.CompanyAuthentication, cancellationToken);
+
+        var testFlag = CopyAndValidateTestFlag(testFlagSecret);
+        var packageReference = Copy(packageReferenceSecret);
+        var companyAuthentication = Copy(companyAuthenticationSecret);
+        if (packageReference.Length != 4 || packageReference.Any(value => !char.IsDigit(value)))
+            throw new InvalidOperationException("The Companies House test package reference must contain four digits.");
+        if (companyAuthentication.Length is < 6 or > 8
+            || companyAuthentication.Any(value => !char.IsAsciiLetterOrDigit(value)))
+            throw new InvalidOperationException("The company authentication code must contain six to eight letters or digits.");
+
+        using var input = new MemoryStream(previewContent.ToArray(), writable: false);
+        var document = SecureXml.Parse(input);
+        var root = document.Root ?? throw new InvalidDataException("The Companies House preview has no document element.");
+        var header = Required(root, GovTalk + "Header");
+        var messageDetails = Required(header, GovTalk + "MessageDetails");
+        var formHeader = Required(root.Descendants(Form + "FormSubmission").SingleOrDefault(), Form + "FormHeader");
+        if (header.Element(GovTalk + "SenderDetails") is not null
+            || messageDetails.Element(GovTalk + "TransactionID") is not null
+            || messageDetails.Element(GovTalk + "GatewayTest") is not null
+            || formHeader.Element(Form + "CompanyAuthenticationCode") is not null)
+            throw new InvalidOperationException("The retained Companies House preview already contains transport-time values.");
+
+        var submission = Required(formHeader, Form + "SubmissionNumber");
+        if (submission.Value != "000000")
+            throw new InvalidOperationException("The retained Companies House preview does not contain the review submission marker.");
+        submission.Value = submissionNumber;
+        AddTransportHeader(header, messageDetails, transactionId, testFlag,
+            Md5Hex(presenterId), Md5Hex(presenterAuthentication));
+        var packageReferenceElement = Required(formHeader, Form + "PackageReference");
+        packageReferenceElement.Value = packageReference;
+        packageReferenceElement.AddBeforeSelf(
+            new XElement(Form + "CompanyAuthenticationCode", companyAuthentication));
+
+        var encodedAccounts = Required(root.Descendants(Form + "Document").SingleOrDefault(), Form + "Data").Value;
+        byte[] decodedAccounts;
+        try
+        {
+            decodedAccounts = Convert.FromBase64String(encodedAccounts);
+        }
+        catch (FormatException exception)
+        {
+            throw new InvalidDataException("The Companies House accounts attachment is not valid base64.", exception);
+        }
+        if (!decodedAccounts.AsSpan().SequenceEqual(accountsContent.Span)
+            || !string.Equals(Convert.ToHexString(SHA256.HashData(decodedAccounts)), accountsSha256,
+                StringComparison.Ordinal))
+            throw new InvalidOperationException("Credential materialisation changed the retained accounts attachment.");
+
+        var content = Serialize(document);
+        return new(ImmutableArray.CreateRange(content), previewSha256,
+            Convert.ToHexString(SHA256.HashData(content)), accountsSha256,
+            CompaniesHouseMaterializedEnvelope.MaterializedEvidence);
+    }
+
     public async Task<CompaniesHouseMaterializedGatewayRequest> MaterializeStatusRequestTestAsync(
         CompaniesHouseStatusQueryScope scope,
         string transactionId,
@@ -232,6 +318,8 @@ public sealed class CompaniesHouseEnvelopeMaterializer(ISecretProvider secrets)
             throw new InvalidOperationException("The Companies House official-test materialiser requires test flag 1.");
         return testFlag;
     }
+
+    private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
 
     private static XElement Required(XElement? parent, XName name) =>
         parent?.Element(name) ?? throw new InvalidDataException($"The Companies House preview is missing {name.LocalName}.");
