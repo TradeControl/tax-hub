@@ -23,6 +23,7 @@ using TradeControl.Tax.UK.WebHarness.Diagnostics.Hmrc;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Preparation;
 
 var assertions = await CompaniesHouseSimulationDiagnosticsTests.RunAsync();
+assertions += await CorporationTaxValidationDiagnosticsTests.RunAsync();
 void Assert(bool condition, string message)
 {
     assertions++;
@@ -163,6 +164,15 @@ using (var token = new ProtectedSecret("test-access-token"))
 
 var diagnosticActions = typeof(HmrcSandboxDiagnosticsController)
     .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+var ctPreflightAction = typeof(CorporationTaxController)
+    .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+    .Single(method => method.Name == nameof(CorporationTaxController.OfficialTestPreflight));
+Assert(ctPreflightAction.GetCustomAttribute<HttpPostAttribute>()?.Template == "official-test-preflight"
+    && ctPreflightAction.GetCustomAttribute<AuthorizeAttribute>()?.AuthenticationSchemes
+        == WebHarnessAuthenticationOptions.ApplicationScheme
+    && typeof(ICorporationTaxOfficialTestPreflight).GetMethods().All(method =>
+        !method.Name.Contains("Submit", StringComparison.OrdinalIgnoreCase)),
+    "The CT ETS diagnostic is not an authenticated, send-disabled preflight boundary.");
 var validateAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.Validate));
 var captureAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.CaptureBrowserSession));
 var signOutAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.EndSession));

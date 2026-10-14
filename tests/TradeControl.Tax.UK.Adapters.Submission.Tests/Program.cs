@@ -5,6 +5,7 @@ using TradeControl.Tax.UK.Adapters.Submission.CompaniesHouse;
 using TradeControl.Tax.UK.Adapters.Submission.Configuration;
 using TradeControl.Tax.UK.Adapters.Submission.FraudPrevention;
 using TradeControl.Tax.UK.Adapters.Submission.OAuth;
+using TradeControl.Tax.UK.Adapters.Submission.TransactionEngine;
 using TradeControl.Tax.UK.Application.Preparation;
 
 var assertions = 0;
@@ -247,6 +248,7 @@ try
     assertions += await RestGatewayTests.RunAsync(root, provider);
     assertions += await CompaniesHouseMaterializerTests.RunAsync(root);
     assertions += await CompaniesHouseHttpGatewayTests.RunAsync();
+    assertions += await TransactionEngineTests.RunAsync(root);
 }
 finally
 {

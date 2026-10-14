@@ -5,4 +5,7 @@
     <Nullable>enable</Nullable>
     <RootNamespace>TradeControl.Tax.UK.Company</RootNamespace>
   </PropertyGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Hmrc\CorporationTax\Ct600\V2026\Schemas\CT-2014-v1-994.xsd" />
+  </ItemGroup>
 </Project>

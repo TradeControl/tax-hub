@@ -14,7 +14,7 @@ public sealed class IxbrlDocumentBuilder
     private static readonly XNamespace Xbrldi = "http://xbrl.org/2006/xbrldi";
     private static readonly XNamespace Link = "http://www.xbrl.org/2003/linkbase";
     private static readonly XNamespace Xlink = "http://www.w3.org/1999/xlink";
-    private static readonly XNamespace Ixt = "http://www.xbrl.org/inlineXBRL/transformation/2020-02-12";
+    private static readonly XNamespace Ixt = "http://www.xbrl.org/inlineXBRL/transformation/2011-07-31";
 
     public DocumentArtifact Build(IxbrlReport report, string fileName)
     {
@@ -47,7 +47,13 @@ public sealed class IxbrlDocumentBuilder
                 new XAttribute(XNamespace.Xmlns + "core", Frc2026Catalog.CoreNamespace),
                 new XAttribute(XNamespace.Xmlns + "bus", Frc2026Catalog.BusinessNamespace),
                 new XAttribute(XNamespace.Xmlns + "direp", Frc2026Catalog.DirectorsReportNamespace),
-                new XAttribute(XNamespace.Xmlns + "ctcomp", CorporationTaxComputationNamespace),
+                // Retain the unused historical declaration on non-CT documents so the
+                // established statutory-accounts bytes remain immutable. CT documents
+                // bind the authoritative HMRC 2025 namespace used by their fact QNames.
+                new XAttribute(XNamespace.Xmlns + "ctcomp",
+                    report.Taxonomy.ReleaseId.StartsWith("HMRC-CT-COMPUTATION-2025", StringComparison.Ordinal)
+                        ? CorporationTaxComputationNamespace
+                        : LegacyCorporationTaxComputationNamespace),
                 new XAttribute(XNamespace.Xmlns + "iso4217", "http://www.xbrl.org/2003/iso4217"),
                 new XElement(Xhtml + "head", new XElement(Xhtml + "title", report.Title),
                     new XElement(Xhtml + "style", new XAttribute("type", "text/css"), "body{font-family:Arial,sans-serif;max-width:900px;margin:2rem auto;color:#222}h1,h2{text-align:center}.identity{text-align:center}.accounts{width:100%;border-collapse:collapse;margin:1.5rem 0}.accounts th,.accounts td{padding:.4rem .6rem;border-bottom:1px solid #ddd}.accounts th:first-child,.accounts td:first-child{text-align:left}.accounts th:not(:first-child),.accounts td:not(:first-child){text-align:right}.total td{font-weight:bold;border-top:1px solid #222}.statements p{margin:.7rem 0}.signature{margin-top:2rem}.filing-information{font-size:.85rem;color:#444}")),
@@ -90,7 +96,7 @@ public sealed class IxbrlDocumentBuilder
             if (fact.Value is not XbrlValue.Monetary monetary) return element;
 
             element.Value = Math.Abs(monetary.Value).ToString("#,##0.00", CultureInfo.InvariantCulture);
-            element.Add(new XAttribute("format", "ixt:num-dot-decimal"));
+            element.Add(new XAttribute("format", "ixt:numdotdecimal"));
             if (monetary.Value >= 0) return element;
 
             element.Add(new XAttribute("sign", "-"));
@@ -222,9 +228,13 @@ public sealed class IxbrlDocumentBuilder
         new(Xbrli + "context", new XAttribute("id", id),
             new XElement(Xbrli + "entity",
                 new XElement(Xbrli + "identifier", new XAttribute("scheme", context.EntityScheme), context.EntityIdentifier),
-                context.Dimensions is { Count: > 0 }
-                    ? new XElement(Xbrli + "segment", context.Dimensions.OrderBy(x => x.Dimension.ToString()).Select(x =>
-                        new XElement(Xbrldi + "explicitMember", new XAttribute("dimension", QName(x.Dimension)), QName(x.Member))))
+                context.Dimensions is { Count: > 0 } || context.TypedDimensions is { Count: > 0 }
+                    ? new XElement(Xbrli + "segment",
+                        context.Dimensions?.OrderBy(x => x.Dimension.ToString()).Select(x =>
+                            new XElement(Xbrldi + "explicitMember", new XAttribute("dimension", QName(x.Dimension)), QName(x.Member))),
+                        context.TypedDimensions?.OrderBy(x => x.Dimension.ToString()).Select(x =>
+                            new XElement(Xbrldi + "typedMember", new XAttribute("dimension", QName(x.Dimension)),
+                                new XElement(XName.Get(x.Domain.LocalName, x.Domain.NamespaceUri), x.Value))))
                     : null),
             new XElement(Xbrli + "period", context.Period switch
             {
@@ -243,7 +253,8 @@ public sealed class IxbrlDocumentBuilder
             new XAttribute("id", $"f{index}"), new XAttribute("name", QName(fact.Concept)), new XAttribute("contextRef", contextId), fact.Value.ToInvariantString());
         if (unitId is not null) element.Add(new XAttribute("unitRef", unitId));
         if (fact.Decimals is not null) element.Add(new XAttribute("decimals", fact.Decimals.Value));
-        if (fact.Value is XbrlValue.Text text) element.Add(new XAttribute(XNamespace.Xml + "lang", text.Language));
+        if (fact.Value is XbrlValue.Text { Language: { Length: > 0 } language })
+            element.Add(new XAttribute(XNamespace.Xml + "lang", language));
         return element;
     }
 
@@ -258,7 +269,8 @@ public sealed class IxbrlDocumentBuilder
         _ => throw new InvalidOperationException($"No deterministic prefix for {name.NamespaceUri}.")
     };
 
-    private const string CorporationTaxComputationNamespace = "http://www.hmrc.gov.uk/ct/comp/2025-01-01";
+    private const string CorporationTaxComputationNamespace = "http://www.hmrc.gov.uk/schemas/ct/comp/2025-01-01";
+    private const string LegacyCorporationTaxComputationNamespace = "http://www.hmrc.gov.uk/ct/comp/2025-01-01";
 
     private static string CurrencyUnitLabel(string currency) => currency.ToUpperInvariant() switch
     {

@@ -16,9 +16,15 @@ public sealed class CorporationTaxPayload
     public CorporationTaxAccountsPayload Accounts { get; set; } = new();
     public IReadOnlyList<CorporationTaxPeriodPayload> Periods { get; set; } = [];
     public CorporationTaxDeclarationPayload Declaration { get; set; } = new();
+    public CorporationTaxOfficialTestPayload OfficialTest { get; set; } = new();
 
     [JsonExtensionData]
     public Dictionary<string, JsonElement>? Extra { get; set; }
+}
+
+public sealed class CorporationTaxOfficialTestPayload
+{
+    public string TransactionId { get; set; } = string.Empty;
 }
 
 public sealed class CorporationTaxIdentityPayload

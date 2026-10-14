@@ -15,11 +15,17 @@ public abstract record XbrlPeriod
 
 public sealed record XbrlDimensionMember(XbrlQName Dimension, XbrlQName Member);
 
+public sealed record XbrlTypedDimensionMember(
+    XbrlQName Dimension,
+    XbrlQName Domain,
+    string Value);
+
 public sealed record XbrlContext(
     string EntityScheme,
     string EntityIdentifier,
     XbrlPeriod Period,
-    IReadOnlyList<XbrlDimensionMember>? Dimensions = null);
+    IReadOnlyList<XbrlDimensionMember>? Dimensions = null,
+    IReadOnlyList<XbrlTypedDimensionMember>? TypedDimensions = null);
 
 public sealed record XbrlUnit(XbrlQName Measure)
 {
@@ -37,7 +43,7 @@ public abstract record XbrlValue
     public sealed record Boolean(bool Value) : XbrlValue;
     public sealed record Date(DateOnly Value) : XbrlValue;
     public sealed record Fixed : XbrlValue;
-    public sealed record Text(string Value, string Language = "en") : XbrlValue;
+    public sealed record Text(string Value, string? Language = "en") : XbrlValue;
 
     internal string ToInvariantString() => this switch
     {

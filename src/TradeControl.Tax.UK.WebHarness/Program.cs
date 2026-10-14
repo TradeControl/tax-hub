@@ -16,6 +16,7 @@ using TradeControl.Tax.UK.WebHarness.Diagnostics.Validation;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Preparation;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Hmrc;
 using TradeControl.Tax.UK.Application.Preparation;
+using TradeControl.Tax.UK.Adapters.Submission.TransactionEngine;
 
 var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddSingleton(TimeProvider.System);
@@ -187,6 +188,37 @@ builder.Services.AddSingleton<ICompaniesHouseOfficialTestStatus>(sp =>
 });
 builder.Services.AddSingleton<CorporationTaxPayloadValidator>();
 builder.Services.AddSingleton<CorporationTaxRunner>();
+builder.Services.AddSingleton<ICorporationTaxOfficialTestPreflight>(sp =>
+{
+    if (!builder.Environment.IsDevelopment())
+        return new DisabledCorporationTaxOfficialTestPreflight();
+    var contentRoot = sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
+    var protectedRoot = Path.GetFullPath(Path.Combine(contentRoot,
+        "../../../../.local/hmrc/corporation-tax/credentials"));
+    var credentials = new HmrcCorporationTaxTestCredentialProvider(
+        Path.Combine(protectedRoot, "email-vendor-id.txt"),
+        Path.Combine(protectedRoot, "Test service passwords-v1-0.txt"));
+    return new CorporationTaxOfficialTestPreflight(
+        sp.GetRequiredService<CorporationTaxRunner>(),
+        new CorporationTaxOfficialTestMaterializer(credentials),
+        "Trade Control",
+        "5.10");
+});
+builder.Services.AddHttpClient("CorporationTaxValidation");
+builder.Services.AddSingleton<ICorporationTaxValidationDiagnostics>(sp =>
+{
+    if (!builder.Environment.IsDevelopment())
+        return new DisabledCorporationTaxValidationDiagnostics();
+    var options = builder.Configuration
+        .GetSection(CorporationTaxValidationOptions.SectionName)
+        .Get<CorporationTaxValidationOptions>() ?? new CorporationTaxValidationOptions();
+    var contentRoot = sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
+    var evidenceRoot = Path.GetFullPath(Path.Combine(contentRoot,
+        "../../../../.local/hmrc/corporation-tax/evidence/webharness-validation"));
+    return new CorporationTaxValidationDiagnostics(
+        sp.GetRequiredService<IHttpClientFactory>().CreateClient("CorporationTaxValidation"),
+        options, evidenceRoot, sp.GetRequiredService<TimeProvider>());
+});
 var hmrcSandboxDiagnosticsEnabled = builder.Environment.IsDevelopment()
     || builder.Configuration.GetValue<bool>("TaxHub:HmrcSandbox:Enabled");
 builder.Services.AddSingleton<IHmrcSandboxDiagnostics>(sp =>

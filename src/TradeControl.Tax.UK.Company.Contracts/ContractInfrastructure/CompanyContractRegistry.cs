@@ -27,7 +27,7 @@ public static class CompanyContractRegistry
     public static VersionedContract HmrcComputationTaxonomy2025 { get; } = new(
         "hmrc-computation-taxonomy", "2025", new DateOnly(2026, 4, 1), null,
         ContractStatus.Production, false,
-        "Accepted by HMRC, but the official validation taxonomy bundle is not provisioned; derived QNames must not be submitted.");
+        "Official HMRC package V1.0.0 and the corrected Phase 5.8 service artifact are pinned; TPVS content findings are clear, but human review and Phase 5.9 IRmark validation remain required.");
 
     public static VersionedContract SelectProduction(string contractId, DateOnly on)
     {

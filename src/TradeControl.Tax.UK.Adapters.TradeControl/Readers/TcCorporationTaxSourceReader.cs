@@ -70,16 +70,18 @@ public sealed class TcCorporationTaxSourceReader : ICorporationTaxSource
                 new(value, StatutoryValueState.Derived, "CO4-Computation", accounts.Versions.Concat(tax.Versions).ToArray());
 
             var turnover = Value(accounts, "IncomeStatement.Turnover");
+            var depreciationExpense = Value(tax, "AddBacks.AccountingDepreciation");
             var profitBeforeTax = turnover
                 + Value(accounts, "IncomeStatement.OtherIncome")
                 - Value(accounts, "IncomeStatement.CostOfSales")
-                - Value(accounts, "IncomeStatement.AdministrativeExpenses");
+                - Value(accounts, "IncomeStatement.AdministrativeExpenses")
+                + depreciationExpense;
             Require(profitBeforeTax == computation.NetProfit,
                 "The accounts projection does not reconcile to Cash.vwTaxBizTotalsByPeriod net profit.");
-            var depreciation = Value(tax, "AddBacks.AccountingDepreciation");
+            var depreciationAddBack = Math.Abs(depreciationExpense);
             var addBacks = new List<StatutorySourceValue<TaxAdjustmentDraft>>
             {
-                new(new("Accounting depreciation", depreciation), StatutoryValueState.Source, "TradeControl", tax.Versions)
+                new(new("Accounting depreciation", depreciationAddBack), StatutoryValueState.Source, "TradeControl", tax.Versions)
             };
             addBacks.AddRange(reviewed.OtherAddBacks.Select(value =>
                 new StatutorySourceValue<TaxAdjustmentDraft>(value, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", [])));

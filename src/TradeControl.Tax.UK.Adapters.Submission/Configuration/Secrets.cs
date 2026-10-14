@@ -251,3 +251,11 @@ public static class CompaniesHouseSecretReferences
             [LivePackageReference] = "TaxHub__CompaniesHouse__LivePackageReference"
         };
 }
+
+public static class CorporationTaxTransactionEngineSecretReferences
+{
+    public static SecretReference VendorId { get; } = new("ct-transaction-engine-vendor-id");
+    public static SecretReference SenderId { get; } = new("ct-transaction-engine-test-sender-id");
+    public static SecretReference Password { get; } = new("ct-transaction-engine-test-password");
+    public static SecretReference Utr { get; } = new("ct-transaction-engine-test-utr");
+}

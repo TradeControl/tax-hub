@@ -78,6 +78,29 @@ var diagnosticFactoryConsumers = Directory.GetFiles(source, "*.cs", SearchOption
 Assert(diagnosticFactoryConsumers.Length == 1
     && diagnosticFactoryConsumers[0].Contains("TradeControl.Tax.UK.WebHarness", StringComparison.Ordinal),
     "The relaxed sandbox-validator formatter escaped the development WebHarness diagnostic.");
+var transactionEngine = Path.Combine(submissionDirectory, "TransactionEngine");
+Assert(Directory.Exists(transactionEngine)
+    && !SourceContains(transactionEngine, "Microsoft.AspNetCore",
+        "CorporationTaxServiceRootSerializer", "CorporationTaxReturnPackage",
+        "VatJson.Serialize", "SaJson.SerializeCanonical"),
+    "The Transaction Engine boundary crossed into host code or introduced a second statutory serializer.");
+var transactionEngineHttpConsumers = Directory.GetFiles(transactionEngine, "*.cs", SearchOption.AllDirectories)
+    .Where(path => File.ReadAllText(path).Contains("HttpClient", StringComparison.Ordinal))
+    .Select(Path.GetFileName).ToArray();
+Assert(transactionEngineHttpConsumers.SequenceEqual(["TransactionEngineHttpGateway.cs"]),
+    "Transaction Engine HTTP escaped its one-attempt Phase 5.10 transport boundary.");
+var webHarness = Path.Combine(source, "TradeControl.Tax.UK.WebHarness");
+Assert(!SourceContains(webHarness, "TransactionEngineFixtureHandler", "HttpTransactionEngine",
+        "CorporationTaxOfficialTestSubmission")
+    && SourceContains(webHarness, "CorporationTaxOfficialTestPreflight",
+        "CT-ETS-EXTERNAL-SEND-DISABLED"),
+    "The Phase 5.10 WebHarness boundary is not a strictly send-disabled ETS preflight.");
+var corporationTaxGateway = File.ReadAllText(Path.Combine(Path.GetDirectoryName(application)!,
+    "Preparation", "CorporationTaxSubmission.cs"));
+Assert(corporationTaxGateway.Contains(
+        "No Corporation Tax service artifact is approved for authority dispatch.",
+        StringComparison.Ordinal),
+    "Phase 5.9 relaxed the fail-closed Corporation Tax submission gate.");
 
 var simulator = projects.Single(path => Path.GetFileName(path) == "TradeControl.Tax.UK.Tools.CompaniesHouseSimulator.csproj");
 Assert(ProjectReferences(simulator).Count == 1

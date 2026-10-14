@@ -9,6 +9,9 @@
     <ProjectReference Include="..\TradeControl.Tax.UK.Application\TradeControl.Tax.UK.Application.csproj" />
   </ItemGroup>
   <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.5" />
+  </ItemGroup>
+  <ItemGroup>
     <InternalsVisibleTo Include="TradeControl.Tax.UK.WebHarness.Tests" />
     <InternalsVisibleTo Include="TradeControl.Tax.UK.Adapters.Submission.Tests" />
   </ItemGroup>

@@ -11,5 +11,7 @@
 
   <ItemGroup>
     <None Include="Fixtures\**\*" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\TradeControl.Tax.UK.Company.Contracts\Hmrc\CorporationTax\Ct600\V2026\Schemas\CT-2014-v1-994.xsd"
+          Link="Fixtures\CorporationTax\CT-2014-v1-994.xsd" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

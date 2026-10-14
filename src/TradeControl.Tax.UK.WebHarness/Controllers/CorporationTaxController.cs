@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
+using Microsoft.AspNetCore.Authorization;
 
 namespace TradeControl.Tax.UK.WebHarness.Controllers;
 
@@ -8,7 +9,8 @@ namespace TradeControl.Tax.UK.WebHarness.Controllers;
 [Route("api/company/corporation-tax")]
 public sealed class CorporationTaxController(
     CorporationTaxPayloadValidator validator,
-    CorporationTaxRunner runner) : ControllerBase
+    CorporationTaxRunner runner,
+    ICorporationTaxOfficialTestPreflight officialTestPreflight) : ControllerBase
 {
     [HttpPost]
     [Produces("application/xml", "application/json")]
@@ -58,6 +60,61 @@ public sealed class CorporationTaxController(
         catch (InvalidOperationException exception)
         {
             return UnprocessableEntity(new { status = "error", code = "SOURCE_NOT_READY", message = exception.Message });
+        }
+        catch (SqlException)
+        {
+            return UnprocessableEntity(new
+            {
+                status = "error",
+                code = "SOURCE_CONNECTION_ERROR",
+                message = "The Trade Control source could not be read using the supplied connection."
+            });
+        }
+    }
+
+    [HttpPost("official-test-preflight")]
+    [Authorize(AuthenticationSchemes = WebHarnessAuthenticationOptions.ApplicationScheme)]
+    [Produces("application/json")]
+    public async Task<IActionResult> OfficialTestPreflight(
+        [FromBody] CorporationTaxPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (!officialTestPreflight.Enabled)
+            return NotFound(new
+            {
+                status = "error",
+                code = "PREFLIGHT_DISABLED",
+                message = "Corporation Tax ETS preflight is available only in Development."
+            });
+        var validation = validator.Validate(payload);
+        if (!validation.IsValid)
+            return BadRequest(new
+            {
+                status = "error",
+                code = "VALIDATION_ERROR",
+                message = "Payload validation failed.",
+                details = validation.Errors
+            });
+        try
+        {
+            return Ok(await officialTestPreflight.ExecuteAsync(payload, cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { status = "error", code = "PREFLIGHT_REQUEST_ERROR", message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnprocessableEntity(new { status = "error", code = "PREFLIGHT_ERROR", message = exception.Message });
+        }
+        catch (IOException)
+        {
+            return UnprocessableEntity(new
+            {
+                status = "error",
+                code = "PROTECTED_CONFIGURATION_ERROR",
+                message = "The protected HMRC CT test configuration is unavailable."
+            });
         }
         catch (SqlException)
         {

@@ -27,7 +27,7 @@ public sealed class CorporationTaxPreparer
 
         var validator = new CompanyContractValidator();
         var computationReport = new CorporationTaxComputationProjection().Project(
-            populated.Computation, populated.Return.CompanyRegistrationNumber);
+            populated.Computation, populated.Return);
         var computationFindings = validator.Validate(computationReport).Findings;
         var computationDocument = new IxbrlDocumentBuilder().Build(computationReport,
             $"{populated.Return.CompanyRegistrationNumber}-{populated.Return.Period.End:yyyyMMdd}-computation.xhtml");
@@ -36,7 +36,8 @@ public sealed class CorporationTaxPreparer
         var package = new CorporationTaxReturnPackage(
             populated.Return, populated.Computation, accountsDocument, computationDocument, []);
         var packageFindings = validator.Validate(package).Findings;
-        var transmission = new CorporationTaxPackageSerializer().Serialize(package, correlationId);
+        var transmission = new CorporationTaxServiceRootSerializer().Serialize(package);
+        var serviceRootFindings = new CorporationTaxServiceRootValidator().Validate(transmission.Content).Findings;
 
         var computationArtifact = PreparedStatutoryArtifact.Create(
             "GB", "HMRC", "CORPORATION-TAX-COMPUTATION",
@@ -47,13 +48,13 @@ public sealed class CorporationTaxPreparer
             sourceEvidence,
             Findings(computationFindings));
         var transmissionArtifact = PreparedStatutoryArtifact.Create(
-            "GB", "HMRC", "SUBMIT-CORPORATION-TAX-RETURN",
-            CompanyContractRegistry.HmrcCt600V1994.Version,
+            "GB", "HMRC", CorporationTaxServiceRootSerializer.OperationCode,
+            CorporationTaxServiceRootSerializer.ContractVersion,
             PreparedArtifactStatus.Preview,
             transmission.MediaType,
             transmission.Content,
             sourceEvidence,
-            Findings(packageFindings));
+            Findings(packageFindings.Concat(serviceRootFindings)));
         var preparedAccounts = PreparedStatutoryArtifact.Create(
             accounts.Artifact.JurisdictionCode,
             "HMRC",

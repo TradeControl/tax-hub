@@ -5,7 +5,17 @@
     "companiesHouse": "TIS-6.0",
     "ct600": "1.994",
     "frcTaxonomy": "FRC-2026-v1.0.0",
-    "hmrcComputationTaxonomy": "2025-derived-catalog-requires-official-validation-assets"
+    "hmrcComputationTaxonomy": "CT2025-v1.0.0"
+  },
+  "authoritativeAssets": {
+    "ct600V1994ArchiveSha256": "504C9DC643195BB5B9AB25A86B9CFF59C6312DE36ADE035BE01CA848D0B81BED",
+    "ct2025ArchiveSha256": "6A4E33434C3E546D664B7344B4490B87B95D854A41ED232F894D274E1FA8C604",
+    "ct2025EntryPoint": "http://www.hmrc.gov.uk/schemas/ct/comp/2025-01-01/ct-comp-2025.xsd"
+  },
+  "goldens": {
+    "accountsSha256": "FF0DDE716CACA048D25BDCB3BF4AA36911F80EB78982AF2AE358AA8A2524986B",
+    "computationSha256": "2744751A585814882A7CC35DCB6BE5C875D7D02AA69AE9D223B08DC01FA5829B",
+    "ctServiceRootSha256": "A3F3729F7236B342FC8C6D10C423104EA9B6F7C86CE86C396D78B2D586A77F2F"
   },
   "source": "Curated synthetic fixture; Example Limited is fictitious"
 }

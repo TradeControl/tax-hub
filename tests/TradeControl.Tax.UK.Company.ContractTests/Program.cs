@@ -1,5 +1,7 @@
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
+using System.Xml.Schema;
 using TradeControl.Tax.UK.Company.ContractInfrastructure;
 using TradeControl.Tax.UK.Company.Projection;
 using TradeControl.Tax.UK.Company.Statutory;
@@ -80,7 +82,7 @@ Assert(!Encoding.UTF8.GetString(filletedIx.Content).Contains("120,000.00", Strin
 var filletedXml = XDocument.Parse(Encoding.UTF8.GetString(filletedIx.Content));
 var filletedText = filletedXml.Root!.Value;
 XNamespace xhtml = "http://www.w3.org/1999/xhtml";
-XNamespace ixt = "http://www.xbrl.org/inlineXBRL/transformation/2020-02-12";
+XNamespace ixt = "http://www.xbrl.org/inlineXBRL/transformation/2011-07-31";
 Assert(!filletedXml.Descendants().Any(element => element.Name.Namespace == xhtml
         && element.Name.LocalName is "main" or "section")
     && filletedXml.Descendants(xhtml + "style").Single().Attribute("type")?.Value == "text/css",
@@ -107,7 +109,7 @@ Assert(filletedXml.Root.GetNamespaceOfPrefix("ixt") == ixt
     "The statutory accounts headings do not identify the sterling presentation unit.");
 Assert(filletedXml.Descendants(ix + "nonFraction")
         .Where(x => x.Attribute("unitRef")?.Value is not null)
-        .Any(x => x.Value == "35,000.00" && x.Attribute("format")?.Value == "ixt:num-dot-decimal"),
+        .Any(x => x.Value == "35,000.00" && x.Attribute("format")?.Value == "ixt:numdotdecimal"),
     "Monetary facts are not displayed with accounting separators and two decimal places.");
 var currentAssetsConcept = taxonomy["CurrentAssets"].Name;
 var negativePresentationReport = fullReport with
@@ -123,7 +125,7 @@ var negativePresentationXml = XDocument.Parse(Encoding.UTF8.GetString(
 var negativePresentedFact = negativePresentationXml.Descendants(ix + "nonFraction")
     .Single(x => x.Attribute("name")?.Value == "core:CurrentAssets" && x.Attribute("sign")?.Value == "-");
 Assert(negativePresentedFact.Value == "35,000.50"
-    && negativePresentedFact.Attribute("format")?.Value == "ixt:num-dot-decimal"
+    && negativePresentedFact.Attribute("format")?.Value == "ixt:numdotdecimal"
     && negativePresentedFact.Parent?.Value == "(35,000.50)",
     "Negative monetary facts are not displayed in brackets while preserving the iXBRL sign.");
 Assert(filletedText.Contains("Jane Director", StringComparison.Ordinal)
@@ -179,14 +181,34 @@ Assert(chSerializer.ParseSubmissionStatuses(statusXml).Single().StatusCode == Co
 
 var computation = FixtureComputation(accounts.Period);
 Assert(computation.AdjustedTradingProfit == 30000m, "Adjusted trading profit calculation changed.");
-var computationReport = new CorporationTaxComputationProjection().Project(computation, accounts.Company.CompanyNumber);
-Assert(validator.Validate(computationReport).IsValid, "Computation XBRL facts failed validation.");
-var computationIx = ixBuilder.Build(computationReport, "computation.html");
-Assert(computationIx.Content.Length > 0, "Computation iXBRL is empty.");
-
 var ct600 = new Ct600Return(accounts.Company.CompanyName, accounts.Company.CompanyNumber, "1234567890", accounts.Period,
     120000m, 28000m, 30000m, 5700m, 5700m, true, true,
     new Ct600A(10000m, 3375m, 3375m), "Jane Director", new DateOnly(2026, 7, 31));
+var computationReport = new CorporationTaxComputationProjection().Project(computation, ct600);
+Assert(validator.Validate(computationReport).IsValid, "Computation XBRL facts failed validation.");
+Assert(computationReport.Facts.All(fact => fact.Context.Dimensions is { Count: > 0 }),
+    "A CT2025 computation fact is missing its required dimensional context.");
+Assert(computationReport.Facts.Single(fact => fact.Concept.LocalName == "ProfitLossPerAccounts")
+        .Context.TypedDimensions?.Single().Dimension.LocalName == "BusinessNameDimension",
+    "The trade computation context is missing its CT2025 typed business-name dimension.");
+var computationIx = ixBuilder.Build(computationReport, "computation.html");
+Assert(computationIx.Content.Length > 0, "Computation iXBRL is empty.");
+var computationDocument = XDocument.Parse(Encoding.UTF8.GetString(computationIx.Content));
+XNamespace xbrldi = "http://xbrl.org/2006/xbrldi";
+Assert(computationDocument.Descendants(xbrldi + "typedMember").Any(member =>
+        member.Attribute("dimension")?.Value == "ctcomp:BusinessNameDimension"
+        && member.Elements().Single().Name.LocalName == "BusinessNameDomain"),
+    "The CT2025 typed business-name dimension was not serialized into iXBRL.");
+var computationIdentityFacts = computationDocument.Descendants(ix + "nonNumeric")
+    .Where(fact => fact.Attribute("name")?.Value is "ctcomp:CompanyName" or "ctcomp:TaxReference")
+    .ToArray();
+Assert(computationIdentityFacts.Length == 2
+    && computationIdentityFacts.All(fact => fact.Attribute(XNamespace.Xml + "lang") is null),
+    "The CT2025 CompanyName or TaxReference fact carries the schema-invalid xml:lang attribute.");
+Assert(computationIdentityFacts.Single(fact => fact.Attribute("name")?.Value == "ctcomp:CompanyName").Value == ct600.CompanyName
+    && computationIdentityFacts.Single(fact => fact.Attribute("name")?.Value == "ctcomp:TaxReference").Value == ct600.Utr,
+    "Removing xml:lang changed a CT2025 identity value.");
+
 var ctPackage = new CorporationTaxReturnPackage(ct600, computation, fullIx, computationIx, []);
 Assert(validator.Validate(ctPackage).IsValid, "Valid Corporation Tax package was rejected.");
 var ctSerializer = new CorporationTaxPackageSerializer();
@@ -201,6 +223,38 @@ Assert(CorporationTaxEndpointSet.Submit.Protocol == "Transaction Engine XML"
     && CorporationTaxEndpointSet.Submit.RequiresStatusPolling,
     "Corporation Tax submission must expose its Transaction Engine XML conversation semantics.");
 Assert(typeof(IRenvelope).GetCustomAttributes(false).Any(), "Official generated CT600 wire family is absent.");
+
+var serviceSerializer = new CorporationTaxServiceRootSerializer();
+var serviceRoot = serviceSerializer.Serialize(ctPackage);
+Assert(serviceRoot.Content.SequenceEqual(serviceSerializer.Serialize(ctPackage).Content),
+    "Corporation Tax service-root serialization is not deterministic.");
+Assert(serviceRoot.Sha256 == "A3F3729F7236B342FC8C6D10C423104EA9B6F7C86CE86C396D78B2D586A77F2F",
+    $"The reviewed CT600 service-root golden changed to {serviceRoot.Sha256}.");
+Assert(fullIx.Sha256 == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fullIx.Content))
+    && computationIx.Sha256 == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(computationIx.Content)),
+    "Service-root serialization changed a source iXBRL artifact or its digest.");
+var serviceDocument = XDocument.Parse(Encoding.UTF8.GetString(serviceRoot.Content), LoadOptions.PreserveWhitespace);
+var ct = XNamespace.Get(Ct600Contract.Namespace);
+Assert(serviceDocument.Root?.Name == ct + "IRenvelope", "The CT service artifact is not a RIM IRenvelope.");
+var irmarks = serviceDocument.Descendants(ct + "IRmark").ToArray();
+Assert(irmarks.Length == 1 && (string?)irmarks[0].Attribute("Type") == "generic"
+    && string.IsNullOrEmpty(irmarks[0].Value), "The CT service root does not contain exactly one empty generic IRmark slot.");
+var xbrlSubmission = serviceDocument.Descendants(ct + "XBRLsubmission").Single();
+Assert(xbrlSubmission.Elements().Select(x => x.Name.LocalName).SequenceEqual(["Computation", "Accounts"]),
+    "The RIM attachment order is not computation followed by accounts.");
+Assert(xbrlSubmission.Descendants(ct + "InlineXBRLDocument").Count() == 2
+    && xbrlSubmission.Descendants(ct + "InlineXBRLDocument").All(x => x.Elements().Single().Name.LocalName == "html"),
+    "The RIM service root does not embed both source XHTML document trees.");
+Assert(!serviceRoot.Content.SequenceEqual(ctXml.Content)
+    && ctDocument.Descendants(ct + "Accounts").Single().Elements().Count() == 0,
+    "The old diagnostic serializer was incorrectly promoted as the service artifact.");
+var serviceValidator = new CorporationTaxServiceRootValidator();
+Assert(serviceValidator.Validate(serviceRoot.Content).IsValid,
+    "The genuine CT service root failed the product RIM validator.");
+Assert(!serviceValidator.Validate(ctXml.Content).IsValid,
+    "Relabelling diagnostic Corporation Tax XML incorrectly passed the service-root validator.");
+AssertSchemaValid(serviceRoot.Content,
+    Path.Combine(AppContext.BaseDirectory, "Fixtures", "CorporationTax", "CT-2014-v1-994.xsd"));
 
 var brokenResult = validator.Validate(ctPackage with { Return = ct600 with { TaxPayable = 1m } });
 Assert(!brokenResult.IsValid && brokenResult.Findings.Any(x => x.Code == "CT005"), "Tax payable mismatch was not rejected.");
@@ -234,9 +288,11 @@ Assert(new XbrlQName("urn:test:one", "A") != new XbrlQName("urn:test:two", "A"),
 Assert(Frc2026Catalog.MicroEntity.Concepts["Turnover"].Name.NamespaceUri == Frc2026Catalog.CoreNamespace, "FRC concept namespace is not pinned.");
 Assert(Frc2026Catalog.MicroEntity.Concepts["AccrualsDeferredIncome"].Name.LocalName == "AccruedLiabilitiesDeferredIncome",
     "The accruals and deferred-income balance does not use the declared FRC 2026 concept.");
-Assert(CompanyContractCatalog.Sources.Count == 3, "Authoritative source provenance is incomplete.");
+Assert(CompanyContractCatalog.Sources.Count == 4, "Authoritative source provenance is incomplete.");
 Assert(CompanyContractCatalog.Sources.All(x => x.Sha256.Length == 64), "A source checksum is invalid.");
 Assert(CompanyContractCatalog.Ct600V1994.Version == "1.994", "CT600 provenance version changed.");
+Assert(CompanyContractCatalog.HmrcComputationTaxonomy2025.Version == "1.0.0",
+    "Corporation Tax computational 2025 provenance version changed.");
 Assert(CompanyContractCatalog.CompaniesHouseTis60.Version == "6.0", "Companies House provenance version changed.");
 Assert(CompanyContractRegistry.SelectProduction("hmrc-ct600", new DateOnly(2026, 4, 7)).Version == "1.994", "Effective-date version selection failed.");
 Assert(CompanyContractRegistry.SelectForPreview("companies-house-accounts", "TIS-6.0", new DateOnly(2026, 10, 3)).Status == ContractStatus.Production,
@@ -251,7 +307,8 @@ AssertUnsupported(() => CompanyContractRegistry.SelectForPreview("companies-hous
     "An unregistered Companies House contract was selected.");
 Assert(!CompanyContractRegistry.CompaniesHouseReplacement.SubmissionReady && CompanyContractRegistry.CompaniesHouseReplacement.Status == ContractStatus.Preview,
     "Future Companies House contract became production-selectable.");
-Assert(!CompanyContractRegistry.HmrcComputationTaxonomy2025.SubmissionReady, "Derived computation QNames were incorrectly marked submission-ready.");
+Assert(!CompanyContractRegistry.HmrcComputationTaxonomy2025.SubmissionReady,
+    "The official computation taxonomy was marked submission-ready before Phase 5.8 review.");
 Assert(CompanyServiceCoverageCatalog.Services.All(x => Enum.IsDefined(x.Disposition)), "A corporate service has no coverage disposition.");
 
 var manifestPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "manifest.json");
@@ -277,7 +334,8 @@ catch (UnsupportedStatutoryScenarioException ex)
 }
 
 Console.WriteLine($"Company contract tests passed ({assertions} assertions).\n" +
-    $"Artifacts: accounts={fullIx.Sha256}, computation={computationIx.Sha256}, CH={chXml.Sha256}, CT={ctXml.Sha256}");
+    $"Artifacts: accounts={fullIx.Sha256}, computation={computationIx.Sha256}, CH={chXml.Sha256}, " +
+    $"CT-diagnostic={ctXml.Sha256}, CT-service={serviceRoot.Sha256}");
 
 void Assert(bool condition, string message)
 {
@@ -298,6 +356,25 @@ void AssertUnsupported(Action action, string message)
     }
 
     throw new InvalidOperationException(message);
+}
+
+void AssertSchemaValid(byte[] bytes, string schemaPath)
+{
+    var errors = new List<string>();
+    var schemas = new XmlSchemaSet { XmlResolver = null };
+    schemas.Add(Ct600Contract.Namespace, schemaPath);
+    var settings = new XmlReaderSettings
+    {
+        DtdProcessing = DtdProcessing.Prohibit,
+        XmlResolver = null,
+        ValidationType = ValidationType.Schema,
+        Schemas = schemas
+    };
+    settings.ValidationEventHandler += (_, args) => errors.Add(args.Message);
+    using var stream = new MemoryStream(bytes, writable: false);
+    using var reader = XmlReader.Create(stream, settings);
+    while (reader.Read()) { }
+    Assert(errors.Count == 0, "CT600 RIM XSD validation failed: " + string.Join(" | ", errors.Take(5)));
 }
 
 static StatutoryAccounts FixtureAccounts()

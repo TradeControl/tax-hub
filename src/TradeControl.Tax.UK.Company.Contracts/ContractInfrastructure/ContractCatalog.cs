@@ -34,10 +34,17 @@ public static class CompanyContractCatalog
         new Uri("https://assets.publishing.service.gov.uk/media/68e8a35c1c8b2a3b5069080c/HMRC-CT-2014-v1-994.zip"),
         "1.994", new DateOnly(2025, 10, 10), "504C9DC643195BB5B9AB25A86B9CFF59C6312DE36ADE035BE01CA848D0B81BED", "Official XSD subset retained under OGL; full ZIP provenance only");
 
+    public static SourceProvenance HmrcComputationTaxonomy2025 { get; } = new(
+        "hmrc-ct-computational-2025-v1.0.0", "Corporation Tax computational 2025 taxonomy",
+        new Uri("http://www.hmrc.gov.uk/schemas/ct/comp/2025-01-01/ct-comp-2025.xsd"),
+        "1.0.0", new DateOnly(2024, 12, 19), "6A4E33434C3E546D664B7344B4490B87B95D854A41ED232F894D274E1FA8C604",
+        "Official package supplied directly by HMRC Software Developers Support; provenance and supported-profile catalog only");
+
     public static SourceProvenance Frc2026 { get; } = new(
         "frc-taxonomy-2026-v1.0.0", "2026 FRC Taxonomy Suite",
         new Uri("https://www.frc.org.uk/documents/8907/FRC-2026-Taxonomy-v1.0.0.zip"),
         "1.0.0", new DateOnly(2025, 11, 18), "AE80AE12D9D747AC531150B0051BCD67E7C9ACF44313DA19105B4CC013566462", "Provenance and derived supported-profile catalog only");
 
-    public static IReadOnlyList<SourceProvenance> Sources { get; } = [CompaniesHouseTis60, Ct600V1994, Frc2026];
+    public static IReadOnlyList<SourceProvenance> Sources { get; } =
+        [CompaniesHouseTis60, Ct600V1994, HmrcComputationTaxonomy2025, Frc2026];
 }
