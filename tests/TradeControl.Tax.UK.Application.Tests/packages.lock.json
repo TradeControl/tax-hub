@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "tradecontrol.tax.uk.application": {
+        "type": "Project",
+        "dependencies": {
+          "TradeControl.Tax.UK.Company.Contracts": "[1.0.0, )",
+          "TradeControl.Tax.UK.Hmrc.MtdIncomeTax.Contracts": "[1.0.0, )",
+          "TradeControl.Tax.UK.Hmrc.Vat.Contracts": "[1.0.0, )"
+        }
+      },
+      "tradecontrol.tax.uk.company.contracts": {
+        "type": "Project"
+      },
+      "tradecontrol.tax.uk.hmrc.mtdincometax.contracts": {
+        "type": "Project"
+      },
+      "tradecontrol.tax.uk.hmrc.vat.contracts": {
+        "type": "Project"
+      }
+    }
+  }
+}

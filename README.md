@@ -27,8 +27,9 @@ adapter boundaries before Limited Company contract implementation begins.
 
 ## Target Framework
 
-Contract, application and adapter libraries currently target `net8.0`. The
-diagnostic ASP.NET Core WebHarness currently targets `net9.0`.
+All active contract, application, adapter, tool, diagnostic-host and test
+projects target .NET 10 LTS. Archived projects outside the active solution keep
+their historical targets.
 
 ## Solution
 

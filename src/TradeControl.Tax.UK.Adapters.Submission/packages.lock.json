@@ -1,0 +1,38 @@
+{
+  "version": 1,
+  "dependencies": {
+    "net10.0": {
+      "System.Security.Cryptography.Xml": {
+        "type": "Direct",
+        "requested": "[10.0.13, )",
+        "resolved": "10.0.13",
+        "contentHash": "v6/GHhLaHkuN/ISgbKzBeyC7TP7S6Qm/dVyKA+p0ay9nlJyLif+spozjAGclY/FRIv2TC+KNQCo7dSNmupvWtQ==",
+        "dependencies": {
+          "System.Security.Cryptography.Pkcs": "10.0.13"
+        }
+      },
+      "System.Security.Cryptography.Pkcs": {
+        "type": "Transitive",
+        "resolved": "10.0.13",
+        "contentHash": "a+EovgC1fBnwdlQ6cn3j4JFBfKqiFaFvoAhjisOoSvazLAcIznaBzPQP0oYnvccmeXfqUH1KebVZOxSeH6rMaw=="
+      },
+      "tradecontrol.tax.uk.application": {
+        "type": "Project",
+        "dependencies": {
+          "TradeControl.Tax.UK.Company.Contracts": "[1.0.0, )",
+          "TradeControl.Tax.UK.Hmrc.MtdIncomeTax.Contracts": "[1.0.0, )",
+          "TradeControl.Tax.UK.Hmrc.Vat.Contracts": "[1.0.0, )"
+        }
+      },
+      "tradecontrol.tax.uk.company.contracts": {
+        "type": "Project"
+      },
+      "tradecontrol.tax.uk.hmrc.mtdincometax.contracts": {
+        "type": "Project"
+      },
+      "tradecontrol.tax.uk.hmrc.vat.contracts": {
+        "type": "Project"
+      }
+    }
+  }
+}

@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>TradeControl.Tax.UK.Adapters.Submission</RootNamespace>
@@ -9,7 +9,7 @@
     <ProjectReference Include="..\TradeControl.Tax.UK.Application\TradeControl.Tax.UK.Application.csproj" />
   </ItemGroup>
   <ItemGroup>
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.5" />
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="TradeControl.Tax.UK.WebHarness.Tests" />
