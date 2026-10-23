@@ -24,6 +24,49 @@ internal static class OAuthTests
         }
 
         var clock = new FakeTimeProvider(new DateTimeOffset(2026, 9, 24, 9, 0, 0, TimeSpan.Zero));
+        var customCallback = new Uri("https://business1.tradecontrol.co.uk/TaxHub/HmrcCallback");
+        new HmrcOAuthOptions(customCallback, TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(5), 18)
+        {
+            ApprovedProductCallbackHost = customCallback.IdnHost
+        }.Validate();
+        assertions++;
+        try
+        {
+            new HmrcOAuthOptions(customCallback, TimeSpan.FromMinutes(10), TimeSpan.FromMinutes(5), 18)
+            {
+                ApprovedProductCallbackHost = "business2.tradecontrol.co.uk"
+            }.Validate();
+            throw new InvalidOperationException("A product callback not matching its explicitly approved host was accepted.");
+        }
+        catch (InvalidOperationException exception) when (exception.Message.Contains("approved sandbox host", StringComparison.Ordinal)) { }
+
+        var brokerKey = Enumerable.Range(33, 32).Select(value => (byte)value).ToArray();
+        using (var tickets = new OAuthBrokerTicketProtector(brokerKey))
+        {
+            var now = clock.GetUtcNow();
+            var handoff = new OAuthBrokerHandoff("sandbox", "tenant-a", "principal-a", "actor-a",
+                "https://test-www.tax.service.gov.uk/oauth/authorize?state=synthetic-state-value-0123456789",
+                "synthetic-state-value-0123456789", "https://business1.tradecontrol.co.uk/",
+                now, now.AddMinutes(5));
+            var protectedTicket = tickets.Protect(handoff, OAuthBrokerContract.HandoffPurpose);
+            Assert(tickets.Unprotect<OAuthBrokerHandoff>(protectedTicket, OAuthBrokerContract.HandoffPurpose) == handoff,
+                "A valid broker handoff did not survive authenticated encryption.");
+            assertions++;
+            try
+            {
+                _ = tickets.Unprotect<OAuthBrokerHandoff>(protectedTicket, OAuthBrokerContract.CompletionPurpose);
+                throw new InvalidOperationException("A broker ticket crossed its cryptographic purpose boundary.");
+            }
+            catch (System.Security.Cryptography.CryptographicException) { }
+            var tampered = protectedTicket[..^1] + (protectedTicket[^1] == 'A' ? 'B' : 'A');
+            assertions++;
+            try
+            {
+                _ = tickets.Unprotect<OAuthBrokerHandoff>(tampered, OAuthBrokerContract.HandoffPurpose);
+                throw new InvalidOperationException("A tampered broker ticket was accepted.");
+            }
+            catch (System.Security.Cryptography.CryptographicException) { }
+        }
         var endpoint = new FakeTokenEndpoint();
         var storePath = Path.Combine(root, "oauth", "grants.enc");
         var key = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();

@@ -5,7 +5,7 @@ using System.Text;
 
 namespace TradeControl.Tax.UK.Adapters.Submission.FraudPrevention;
 
-internal sealed class FraudContextSnapshot
+public sealed class FraudContextSnapshot
 {
     public required string TenantReference { get; init; }
     public required string PrincipalReference { get; init; }
@@ -29,7 +29,7 @@ internal sealed class FraudContextSnapshot
     public required SortedDictionary<string, string> Versions { get; init; }
 }
 
-internal sealed record SnapshotHop(string By, string For);
+public sealed record SnapshotHop(string By, string For);
 
 internal static class FraudIngressCapture
 {

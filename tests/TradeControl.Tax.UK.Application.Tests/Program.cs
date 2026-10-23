@@ -4,6 +4,7 @@ using System.Text.Json;
 using TradeControl.Tax.Data;
 using TradeControl.Tax.UK.Application.DataProvision;
 using TradeControl.Tax.UK.Application.Preparation;
+using TradeControl.Tax.UK.Application.StatutoryEvidence;
 using TradeControl.Tax.UK.Hmrc.MtdIncomeTax.v1_0.Shared;
 
 var assertions = 0;
@@ -21,6 +22,72 @@ void AssertRejected(Action action, string message)
     catch (InvalidOperationException) { return; }
     throw new InvalidOperationException(message);
 }
+
+var inventory = new[]
+{
+    new StatutorySourceInventoryItem("Invoice.tbInvoice", "[{\"invoice\":\"INV-1\"}]"),
+    new StatutorySourceInventoryItem("App.tbYearPeriod", "[{\"period\":\"2026-06-01\"}]")
+};
+var inventoryDigest = StatutorySourceInventory.Sha256(inventory);
+Assert(inventoryDigest == StatutorySourceInventory.Sha256(inventory.Reverse()),
+    "Source inventory hashing depends on adapter row order.");
+Assert(inventoryDigest != StatutorySourceInventory.Sha256(
+        inventory.Select(item => item.SourceObject == "Invoice.tbInvoice"
+            ? item with { CanonicalState = item.CanonicalState.Replace("INV-1", "INV-2") }
+            : item)),
+    "A one-character source mutation did not change the inventory digest.");
+
+var payload = Encoding.UTF8.GetBytes("{\"periodKey\":\"26A1\",\"finalised\":true}");
+var payloadDigest = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(payload));
+VatSealInput SealInput(string tenant = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    string environment = "Sandbox", string explanation = "Supplier rounding evidence") => new(
+    tenant,
+    "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    "HOME",
+    "123456789",
+    "26A1",
+    new DateOnly(2026, 4, 1),
+    new DateOnly(2026, 6, 30),
+    environment,
+    42,
+    inventoryDigest,
+    payloadDigest,
+    payload.Length,
+    [new(new DateOnly(2026, 6, 1), 0.05m, explanation)],
+    new(100m, 0.05m, 100.05m, 20m, 80.05m, 500m, 200m, 0m, 0m, true),
+    new Dictionary<string, string>
+    {
+        ["tcweb"] = "1.0.0",
+        ["sqlnode"] = "4.1.16",
+        ["tax-hub"] = "1.0.0"
+    });
+var seal = VatStatutorySeal.Create(SealInput());
+Assert(seal.Sha256 == "120EC34ECF117863E175D62803D1C92945C049F38E486D69E36AE99A6D410BC0",
+    "The versioned VAT canonical-byte conformance vector changed.");
+var repeatedSeal = VatStatutorySeal.Create(SealInput());
+Assert(seal.CanonicalBytes.SequenceEqual(repeatedSeal.CanonicalBytes) && seal.Sha256 == repeatedSeal.Sha256,
+    "Identical VAT seal inputs did not reproduce exact canonical bytes.");
+Assert(VatStatutorySeal.Verify(seal.CanonicalBytes, seal.Sha256),
+    "A canonical VAT seal failed independent digest verification.");
+var mutatedSealBytes = seal.CanonicalBytes.ToArray();
+mutatedSealBytes[^2] ^= 1;
+Assert(!VatStatutorySeal.Verify(mutatedSealBytes, seal.Sha256),
+    "A one-bit VAT seal mutation passed verification.");
+Assert(VatStatutorySeal.Create(SealInput(tenant: "cccccccc-cccc-cccc-cccc-cccccccccccc")).Sha256 != seal.Sha256,
+    "Cross-tenant substitution did not change the VAT seal.");
+Assert(VatStatutorySeal.Create(SealInput(environment: "Production")).Sha256 != seal.Sha256,
+    "Cross-environment substitution did not change the VAT seal.");
+Assert(VatStatutorySeal.Create(SealInput() with
+        { ObligationReference = "26A2", PeriodStart = new(2026, 7, 1), PeriodEnd = new(2026, 9, 30),
+            Adjustments = [new(new(2026, 9, 1), 0.05m, "Supplier rounding evidence")] }).Sha256 != seal.Sha256,
+    "Cross-period substitution did not change the VAT seal.");
+Assert(VatStatutorySeal.Create(SealInput(explanation: "A different explanation")).Sha256 != seal.Sha256,
+    "An owner-explanation change did not change the VAT seal.");
+AssertRejected(() => VatStatutorySeal.Create(SealInput(explanation: " ")),
+    "A non-zero VAT adjustment without an owner explanation was sealed.");
+AssertRejected(() => StatutorySourceInventory.Sha256(
+        [new("duplicate", "one"), new("duplicate", "two")]),
+    "Duplicate source inventory objects were accepted.");
 
 var zero = TaxValue<decimal>.ExplicitZero(0m);
 var absent = TaxValue<decimal>.Absent("No source fact.");

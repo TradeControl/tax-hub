@@ -52,6 +52,17 @@ public sealed class FraudHeaderService : IDisposable
                 selectedOptions.EvidenceRetention, selectedClock), selectedClock);
     }
 
+    public static FraudHeaderService Create(FraudDeploymentTopology topology,
+        FraudVendorConfiguration vendor, IFraudContextStore store,
+        FraudHeaderOptions? options = null, TimeProvider? clock = null,
+        bool sandboxValidatorDiagnostic = false)
+    {
+        var selectedOptions = options ?? FraudHeaderOptions.Default;
+        selectedOptions.Validate();
+        return new(topology, vendor, selectedOptions, store, clock,
+            sandboxValidatorDiagnostic);
+    }
+
     public static FraudHeaderService CreateFileBackedSandboxValidatorDiagnostic(string protectedRoot,
         ReadOnlySpan<byte> encryptionKey, FraudDeploymentTopology topology, FraudVendorConfiguration vendor,
         FraudHeaderOptions? options = null, TimeProvider? clock = null)

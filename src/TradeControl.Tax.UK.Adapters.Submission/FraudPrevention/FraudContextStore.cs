@@ -5,7 +5,7 @@ using System.Text.Json;
 
 namespace TradeControl.Tax.UK.Adapters.Submission.FraudPrevention;
 
-internal interface IFraudContextStore : IDisposable
+public interface IFraudContextStore : IDisposable
 {
     Task<SealedFraudContextReference> StoreAsync(FraudContextSnapshot snapshot,
         CancellationToken cancellationToken = default);

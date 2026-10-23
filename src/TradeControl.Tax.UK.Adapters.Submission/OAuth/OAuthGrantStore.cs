@@ -5,16 +5,16 @@ using System.Text.Json;
 
 namespace TradeControl.Tax.UK.Adapters.Submission.OAuth;
 
-internal sealed record PendingOAuthAuthorisation(
+public sealed record PendingOAuthAuthorisation(
     string State, string CodeVerifier, string TenantReference, string PrincipalReference,
     string ActorReference, string RequiredScope, string RedirectUri, DateTimeOffset ExpiresAtUtc);
 
-internal sealed record StoredOAuthGrant(
+public sealed record StoredOAuthGrant(
     string TenantReference, string PrincipalReference, string RequiredScope,
     string AccessToken, string RefreshToken, HashSet<string> Scopes,
     DateTimeOffset AccessTokenExpiresAtUtc, DateTimeOffset GrantExpiresAtUtc, bool Revoked = false);
 
-internal interface IOAuthGrantStore
+public interface IOAuthGrantStore
 {
     Task SavePendingAsync(PendingOAuthAuthorisation pending, CancellationToken cancellationToken = default);
     Task<PendingOAuthAuthorisation?> ConsumePendingAsync(string state, string tenantReference,

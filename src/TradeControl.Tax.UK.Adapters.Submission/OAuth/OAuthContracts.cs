@@ -30,6 +30,8 @@ public sealed record HmrcOAuthOptions(
     TimeSpan AccessTokenExpirySkew,
     int GrantLifetimeMonths)
 {
+    public string? ApprovedProductCallbackHost { get; init; }
+
     public static HmrcOAuthOptions LocalSandbox { get; } = new(
         new Uri("https://localhost:44362/VatMTD", UriKind.Absolute),
         TimeSpan.FromMinutes(10),
@@ -43,7 +45,8 @@ public sealed record HmrcOAuthOptions(
             && string.IsNullOrEmpty(RedirectUri.Query)
             && string.IsNullOrEmpty(RedirectUri.Fragment)
             && (RedirectUri.IsLoopback
-                || RedirectUri.Host.EndsWith(".azurewebsites.net", StringComparison.OrdinalIgnoreCase));
+                || RedirectUri.Host.EndsWith(".azurewebsites.net", StringComparison.OrdinalIgnoreCase)
+                || IsExplicitlyApprovedProductHost());
         var approvedDiagnosticCallback = RedirectUri == LocalSandbox.RedirectUri
             || (RedirectUri.Scheme == Uri.UriSchemeHttps
                 && RedirectUri.AbsolutePath.Equals("/VatMTD", StringComparison.Ordinal)
@@ -59,6 +62,13 @@ public sealed record HmrcOAuthOptions(
         if (GrantLifetimeMonths is < 1 or > 18)
             throw new InvalidOperationException("The OAuth grant lifetime is invalid.");
     }
+
+    private bool IsExplicitlyApprovedProductHost() =>
+        !string.IsNullOrWhiteSpace(ApprovedProductCallbackHost)
+        && Uri.CheckHostName(ApprovedProductCallbackHost) == UriHostNameType.Dns
+        && RedirectUri.IsDefaultPort
+        && RedirectUri.IdnHost.Equals(ApprovedProductCallbackHost,
+            StringComparison.OrdinalIgnoreCase);
 }
 
 public sealed record OAuthAuthorisationStart(Uri AuthorisationUri, DateTimeOffset ExpiresAtUtc)

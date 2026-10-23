@@ -40,6 +40,10 @@ public sealed class HmrcOAuthService : IDisposable
         return service;
     }
 
+    public static HmrcOAuthService CreateSandbox(ISecretProvider secrets, IOAuthGrantStore grantStore,
+        IHmrcOAuthTokenEndpoint tokens, HmrcOAuthOptions options, TimeProvider? clock = null) =>
+        new(EnvironmentSelector.Sandbox(), options, secrets, grantStore, tokens, clock);
+
     private IDisposable? _ownedResourceHolder;
 
     public async Task<OAuthAuthorisationStart> BeginAuthorisationAsync(AuthorityDispatchContext context,
