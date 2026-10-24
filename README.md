@@ -15,7 +15,7 @@ The module provides:
 
 Product specifications and implementation designs are maintained in the parent
 [`tradecontrol.web`](https://github.com/TradeControl/tradecontrol.web) repository
-under `docs/projects/Tax Hub`. This repository contains only technical material
+under `docs/projects/tax`. This repository contains only technical material
 owned by the Tax Hub implementation.
 
 Tax Hub is included in `tradecontrol.web` as the `src/tax-hub` Git submodule.
