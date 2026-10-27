@@ -107,29 +107,35 @@ public sealed class HmrcOAuthService : IDisposable
     {
         ArgumentNullException.ThrowIfNull(context);
         RequireEnabledScope(requiredScope);
-        await using var lease = await _store.AcquireRefreshLeaseAsync(context.TenantReference,
-            context.AuthorisationPrincipalReference, requiredScope, cancellationToken);
+
         var grant = await _store.GetGrantAsync(context.TenantReference, context.AuthorisationPrincipalReference,
             requiredScope, cancellationToken);
-        if (grant is null) return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.MissingGrant);
-        if (grant.Revoked) return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.RevokedGrant);
-        if (!grant.Scopes.Contains(requiredScope))
-            return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.ScopeNotGranted);
+        var immediate = EvaluateWithoutRefresh(grant, requiredScope);
+        if (immediate is not null) return immediate;
+
+        // A lease is required only for refresh-token rotation. Taking it for missing or healthy grants turns
+        // every read-only status check into a storage write/lease operation and creates avoidable contention.
+        await using var lease = await _store.AcquireRefreshLeaseAsync(context.TenantReference,
+            context.AuthorisationPrincipalReference, requiredScope, cancellationToken);
+        grant = await _store.GetGrantAsync(context.TenantReference, context.AuthorisationPrincipalReference,
+            requiredScope, cancellationToken);
+        immediate = EvaluateWithoutRefresh(grant, requiredScope);
+        if (immediate is not null) return immediate;
+
+        // EvaluateWithoutRefresh returns null only for an otherwise valid grant whose access token needs refresh.
+        var refreshGrant = grant ?? throw new InvalidOperationException(
+            "The OAuth grant requiring refresh is unavailable.");
         var now = _clock.GetUtcNow();
-        if (grant.GrantExpiresAtUtc <= now)
-            return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.ExpiredGrant);
-        if (grant.AccessTokenExpiresAtUtc > now + _options.AccessTokenExpirySkew)
-            return OAuthAccessOutcome.Available(grant.AccessToken, grant.AccessTokenExpiresAtUtc);
 
         OAuthTokenResponse refreshed;
-        try { refreshed = await RefreshAsync(grant.RefreshToken, cancellationToken); }
+        try { refreshed = await RefreshAsync(refreshGrant.RefreshToken, cancellationToken); }
         catch (OAuthTokenEndpointException exception) when (exception.RequiresReauthorisation)
         {
             await _store.RevokeAsync(context.TenantReference, context.AuthorisationPrincipalReference,
                 requiredScope, cancellationToken);
             return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.RefreshRejected);
         }
-        if (FixedEquals(grant.RefreshToken, refreshed.RefreshToken))
+        if (FixedEquals(refreshGrant.RefreshToken, refreshed.RefreshToken))
         {
             await _store.RevokeAsync(context.TenantReference, context.AuthorisationPrincipalReference,
                 requiredScope, cancellationToken);
@@ -142,7 +148,7 @@ public sealed class HmrcOAuthService : IDisposable
             return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.RefreshRejected);
         }
         var scopes = refreshed.Scopes.Count == 0
-            ? new HashSet<string>(grant.Scopes, StringComparer.Ordinal)
+            ? new HashSet<string>(refreshGrant.Scopes, StringComparer.Ordinal)
             : new HashSet<string>(refreshed.Scopes, StringComparer.Ordinal);
         if (!scopes.Contains(requiredScope))
         {
@@ -150,7 +156,7 @@ public sealed class HmrcOAuthService : IDisposable
                 requiredScope, cancellationToken);
             return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.ScopeNotGranted);
         }
-        var updated = grant with
+        var updated = refreshGrant with
         {
             AccessToken = refreshed.AccessToken,
             RefreshToken = refreshed.RefreshToken,
@@ -159,6 +165,20 @@ public sealed class HmrcOAuthService : IDisposable
         };
         await _store.SaveGrantAsync(updated, cancellationToken);
         return OAuthAccessOutcome.Available(updated.AccessToken, updated.AccessTokenExpiresAtUtc);
+    }
+
+    private OAuthAccessOutcome? EvaluateWithoutRefresh(StoredOAuthGrant? grant, string requiredScope)
+    {
+        if (grant is null) return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.MissingGrant);
+        if (grant.Revoked) return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.RevokedGrant);
+        if (!grant.Scopes.Contains(requiredScope))
+            return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.ScopeNotGranted);
+        var now = _clock.GetUtcNow();
+        if (grant.GrantExpiresAtUtc <= now)
+            return OAuthAccessOutcome.Reauthorise(OAuthReauthorisationReason.ExpiredGrant);
+        return grant.AccessTokenExpiresAtUtc > now + _options.AccessTokenExpirySkew
+            ? OAuthAccessOutcome.Available(grant.AccessToken, grant.AccessTokenExpiresAtUtc)
+            : null;
     }
 
     public Task RevokeAsync(AuthorityDispatchContext context, string requiredScope,

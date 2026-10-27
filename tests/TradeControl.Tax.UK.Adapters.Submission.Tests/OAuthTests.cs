@@ -67,6 +67,38 @@ internal static class OAuthTests
             }
             catch (System.Security.Cryptography.CryptographicException) { }
         }
+
+        var leaseStore = new LeaseTrackingGrantStore();
+        var leaseEndpoint = new FakeTokenEndpoint();
+        using (var leaseService = HmrcOAuthService.CreateSandbox(secrets, leaseStore, leaseEndpoint,
+                   HmrcOAuthOptions.LocalSandbox, clock))
+        {
+            var leaseContext = Context("tenant-lease", "principal-lease", "actor-lease");
+            using (var missing = await leaseService.GetAccessAsync(leaseContext, HmrcOAuthScopes.ReadVat))
+                Assert(missing.ReauthorisationReason == OAuthReauthorisationReason.MissingGrant
+                    && leaseStore.LeaseCalls == 0,
+                    "A missing OAuth grant unnecessarily acquired the refresh-token lease.");
+
+            leaseStore.Grant = new StoredOAuthGrant("tenant-lease", "principal-lease",
+                HmrcOAuthScopes.ReadVat, "lease-access-one", "lease-refresh-one",
+                [HmrcOAuthScopes.ReadVat], clock.GetUtcNow().AddHours(1), clock.GetUtcNow().AddMonths(18));
+            using (var healthy = await leaseService.GetAccessAsync(leaseContext, HmrcOAuthScopes.ReadVat))
+                Assert(healthy.Kind == OAuthAccessOutcomeKind.Available && leaseStore.LeaseCalls == 0,
+                    "A healthy OAuth grant unnecessarily acquired the refresh-token lease.");
+
+            leaseStore.Grant = leaseStore.Grant with
+            {
+                AccessTokenExpiresAtUtc = clock.GetUtcNow().AddMinutes(1)
+            };
+            leaseEndpoint.RefreshResponse = Token("lease-access-two", "lease-refresh-two",
+                HmrcOAuthScopes.ReadVat, TimeSpan.FromHours(4));
+            using (var refreshed = await leaseService.GetAccessAsync(leaseContext, HmrcOAuthScopes.ReadVat))
+                Assert(refreshed.Kind == OAuthAccessOutcomeKind.Available
+                    && leaseStore.LeaseCalls == 1 && leaseStore.SaveCalls == 1
+                    && leaseEndpoint.RefreshCalls == 1,
+                    "An expiring OAuth grant did not acquire exactly one lease and persist one rotated token.");
+        }
+
         var endpoint = new FakeTokenEndpoint();
         var storePath = Path.Combine(root, "oauth", "grants.enc");
         var key = Enumerable.Range(1, 32).Select(value => (byte)value).ToArray();
@@ -255,5 +287,52 @@ internal static class OAuthTests
             if (RefreshException is not null) throw RefreshException;
             return RefreshResponse;
         }
+    }
+
+    private sealed class LeaseTrackingGrantStore : IOAuthGrantStore
+    {
+        public StoredOAuthGrant? Grant { get; set; }
+        public int LeaseCalls { get; private set; }
+        public int SaveCalls { get; private set; }
+
+        public Task SavePendingAsync(PendingOAuthAuthorisation pending,
+            CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+        public Task<PendingOAuthAuthorisation?> ConsumePendingAsync(string state, string tenantReference,
+            string principalReference, string actorReference, DateTimeOffset nowUtc,
+            CancellationToken cancellationToken = default) => Task.FromResult<PendingOAuthAuthorisation?>(null);
+
+        public Task<StoredOAuthGrant?> GetGrantAsync(string tenantReference, string principalReference,
+            string requiredScope, CancellationToken cancellationToken = default) => Task.FromResult(
+            Grant is not null && Grant.TenantReference == tenantReference
+                && Grant.PrincipalReference == principalReference && Grant.Scopes.Contains(requiredScope)
+                    ? Grant : null);
+
+        public Task SaveGrantAsync(StoredOAuthGrant grant, CancellationToken cancellationToken = default)
+        {
+            Grant = grant;
+            SaveCalls++;
+            return Task.CompletedTask;
+        }
+
+        public Task RevokeAsync(string tenantReference, string principalReference, string requiredScope,
+            CancellationToken cancellationToken = default)
+        {
+            if (Grant is not null) Grant = Grant with { Revoked = true };
+            return Task.CompletedTask;
+        }
+
+        public Task<IAsyncDisposable> AcquireRefreshLeaseAsync(string tenantReference,
+            string principalReference, string requiredScope, CancellationToken cancellationToken = default)
+        {
+            LeaseCalls++;
+            return Task.FromResult<IAsyncDisposable>(NoOpAsyncDisposable.Instance);
+        }
+    }
+
+    private sealed class NoOpAsyncDisposable : IAsyncDisposable
+    {
+        public static NoOpAsyncDisposable Instance { get; } = new();
+        public ValueTask DisposeAsync() => ValueTask.CompletedTask;
     }
 }
