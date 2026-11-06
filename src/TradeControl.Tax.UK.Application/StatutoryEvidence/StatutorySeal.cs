@@ -45,6 +45,30 @@ public static class StatutorySourceInventory
 
 public sealed record VatSealAdjustment(DateOnly PeriodStart, decimal Amount, string? Explanation);
 
+public sealed record CategoryTreeSealEvidence(
+    string VersionId,
+    string CanonicalProfile,
+    string CanonicalSha256,
+    long CanonicalByteLength);
+
+public static class CategoryTreeStatutoryEvidence
+{
+    public static void Validate(CategoryTreeSealEvidence? evidence)
+    {
+        if (evidence is null)
+            throw new ArgumentException("Category Tree statutory evidence is required.", nameof(evidence));
+        if (string.IsNullOrWhiteSpace(evidence.VersionId) || evidence.VersionId.Trim().Length > 10)
+            throw new ArgumentException("The Category Tree version identifier is invalid.", nameof(evidence));
+        if (string.IsNullOrWhiteSpace(evidence.CanonicalProfile))
+            throw new ArgumentException("The Category Tree canonical profile is required.", nameof(evidence));
+        if (evidence.CanonicalSha256 is not { Length: 64 }
+            || !evidence.CanonicalSha256.All(Uri.IsHexDigit))
+            throw new ArgumentException("The Category Tree canonical digest must be a SHA-256 value.", nameof(evidence));
+        if (evidence.CanonicalByteLength < 1)
+            throw new ArgumentException("The Category Tree canonical byte length is required.", nameof(evidence));
+    }
+}
+
 public sealed record VatSealBoxes(
     decimal VatDueSales,
     decimal VatDueAcquisitions,
@@ -70,6 +94,7 @@ public sealed record VatSealInput(
     string SourceInventorySha256,
     string PayloadSha256,
     int PayloadLength,
+    CategoryTreeSealEvidence CategoryTree,
     IReadOnlyList<VatSealAdjustment> Adjustments,
     VatSealBoxes Boxes,
     IReadOnlyDictionary<string, string> SoftwareVersions);
@@ -78,7 +103,7 @@ public sealed record StatutorySealCandidate(byte[] CanonicalBytes, string Sha256
 
 public static class VatStatutorySeal
 {
-    public const string Profile = "trade-control-statutory-seal-v1";
+    public const string Profile = "trade-control-statutory-seal-v2";
 
     public static StatutorySealCandidate Create(VatSealInput input)
     {
@@ -103,6 +128,13 @@ public static class VatStatutorySeal
             writer.WriteString("sourceInventorySha256", input.SourceInventorySha256.ToUpperInvariant());
             writer.WriteString("payloadSha256", input.PayloadSha256.ToUpperInvariant());
             writer.WriteNumber("payloadLength", input.PayloadLength);
+            writer.WritePropertyName("categoryTree");
+            writer.WriteStartObject();
+            writer.WriteString("versionId", input.CategoryTree.VersionId.Trim());
+            writer.WriteString("canonicalProfile", input.CategoryTree.CanonicalProfile.Trim());
+            writer.WriteString("canonicalSha256", input.CategoryTree.CanonicalSha256.ToUpperInvariant());
+            writer.WriteNumber("canonicalByteLength", input.CategoryTree.CanonicalByteLength);
+            writer.WriteEndObject();
             writer.WritePropertyName("adjustments");
             writer.WriteStartArray();
             foreach (var adjustment in input.Adjustments.OrderBy(item => item.PeriodStart))
@@ -157,6 +189,7 @@ public static class VatStatutorySeal
         if (!IsSha256(input.SourceInventorySha256) || !IsSha256(input.PayloadSha256))
             throw new ArgumentException("The source and payload digests must be SHA-256 values.", nameof(input));
         if (input.PayloadLength < 1) throw new ArgumentException("The exact payload length is required.", nameof(input));
+        CategoryTreeStatutoryEvidence.Validate(input.CategoryTree);
         if (input.Adjustments is null || input.Adjustments.GroupBy(item => item.PeriodStart).Any(group => group.Count() > 1))
             throw new ArgumentException("VAT adjustment periods must be unique.", nameof(input));
         foreach (var adjustment in input.Adjustments)

@@ -53,6 +53,8 @@ VatSealInput SealInput(string tenant = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
     inventoryDigest,
     payloadDigest,
     payload.Length,
+    new("CV00000001", "trade-control-category-tree-v1",
+        "1B067CC83D99EB90BDB1BFC58B9866C4C3573CE0A7788F86C3F2B8603BE0DBF7", 11501),
     [new(new DateOnly(2026, 6, 1), 0.05m, explanation)],
     new(100m, 0.05m, 100.05m, 20m, 80.05m, 500m, 200m, 0m, 0m, true),
     new Dictionary<string, string>
@@ -62,7 +64,7 @@ VatSealInput SealInput(string tenant = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
         ["tax-hub"] = "1.0.0"
     });
 var seal = VatStatutorySeal.Create(SealInput());
-Assert(seal.Sha256 == "120EC34ECF117863E175D62803D1C92945C049F38E486D69E36AE99A6D410BC0",
+Assert(seal.Sha256 == "B1BC725A7686D5871BB70105C5581980A2708E3B1FDDA31F1B1F7262B71423B3",
     "The versioned VAT canonical-byte conformance vector changed.");
 var repeatedSeal = VatStatutorySeal.Create(SealInput());
 Assert(seal.CanonicalBytes.SequenceEqual(repeatedSeal.CanonicalBytes) && seal.Sha256 == repeatedSeal.Sha256,
@@ -77,6 +79,15 @@ Assert(VatStatutorySeal.Create(SealInput(tenant: "cccccccc-cccc-cccc-cccc-cccccc
     "Cross-tenant substitution did not change the VAT seal.");
 Assert(VatStatutorySeal.Create(SealInput(environment: "Production")).Sha256 != seal.Sha256,
     "Cross-environment substitution did not change the VAT seal.");
+Assert(VatStatutorySeal.Create(SealInput() with
+        { CategoryTree = SealInput().CategoryTree with { VersionId = "CV00000002" } }).Sha256 != seal.Sha256,
+    "A Category Tree version change did not change the VAT seal.");
+Assert(VatStatutorySeal.Create(SealInput() with
+        { CategoryTree = SealInput().CategoryTree with { CanonicalSha256 = new string('A', 64) } }).Sha256 != seal.Sha256,
+    "A Category Tree content change did not change the VAT seal.");
+AssertRejected(() => VatStatutorySeal.Create(SealInput() with
+        { CategoryTree = SealInput().CategoryTree with { CanonicalSha256 = "invalid" } }),
+    "An invalid Category Tree canonical digest was sealed.");
 Assert(VatStatutorySeal.Create(SealInput() with
         { ObligationReference = "26A2", PeriodStart = new(2026, 7, 1), PeriodEnd = new(2026, 9, 30),
             Adjustments = [new(new(2026, 9, 1), 0.05m, "Supplier rounding evidence")] }).Sha256 != seal.Sha256,
