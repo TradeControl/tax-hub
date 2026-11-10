@@ -130,6 +130,31 @@ Assert(swaggerFraudScript.Contains(
         StringComparison.Ordinal),
     "Background Swagger browser-fact capture can force host authentication for unrelated diagnostics.");
 
+var companiesHouseDdl = File.ReadAllText(Path.Combine(source, "Database", "Tax",
+    "CompaniesHouseWorkflow.sql"));
+Assert(companiesHouseDdl.Contains("PRIMARY KEY (TenantReference, Reference)", StringComparison.Ordinal)
+       && companiesHouseDdl.Contains("WHERE IsActive = 1", StringComparison.Ordinal)
+       && companiesHouseDdl.Contains("CompaniesHouseAuthoritySequence", StringComparison.Ordinal),
+    "Companies House workflow SQL lost tenant partitioning or one-active-filing enforcement.");
+Assert(companiesHouseDdl.Contains("FOREIGN KEY (TenantReference, PreparationReference)",
+           StringComparison.Ordinal)
+       && companiesHouseDdl.Contains("FOREIGN KEY (TenantReference, ApprovalReference)",
+           StringComparison.Ordinal),
+    "Companies House workflow SQL no longer preserves its tenant-scoped evidence chain.");
+Assert(companiesHouseDdl.Contains("UX_CompaniesHouseApproval_Preparation", StringComparison.Ordinal),
+    "Companies House workflow SQL permits competing approvals for one exact preparation.");
+Assert(companiesHouseDdl.Contains("CREATE ROLE TaxHubCompaniesHouseApplication", StringComparison.Ordinal)
+       && companiesHouseDdl.Contains(
+           "GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax TO TaxHubCompaniesHouseApplication",
+           StringComparison.Ordinal),
+    "Companies House workflow SQL does not provision its least-privilege application role.");
+Assert(companiesHouseDdl.Contains("ALTER SCHEMA Tax TRANSFER", StringComparison.Ordinal)
+       && companiesHouseDdl.Contains("DROP SCHEMA TaxHub", StringComparison.Ordinal),
+    "Companies House workflow SQL does not preserve the reviewed TaxHub-to-Tax migration path.");
+Assert(!companiesHouseDdl.Contains("DROP TABLE", StringComparison.OrdinalIgnoreCase)
+       && !companiesHouseDdl.Contains("DELETE FROM", StringComparison.OrdinalIgnoreCase),
+    "The additive Companies House workflow deployment script contains destructive DDL or DML.");
+
 Console.WriteLine($"Tax Hub architecture tests passed ({assertions} assertions).");
 
 static string FindRoot(string start)

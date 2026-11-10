@@ -1,4 +1,7 @@
 using Microsoft.Data.SqlClient;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using TradeControl.Tax.UK.Adapters.TradeControl.Data;
 using TradeControl.Tax.UK.Application.DataProvision;
 
@@ -176,12 +179,30 @@ ORDER BY TagCode;
                 SupportStatus = support,
                 StatutoryAmount = support == TcTaxSupportStatus.Supported ? SqlHelpers.GetDecimal(reader, "StatutoryAmount") : null
             });
-            var rowVersion = Convert.ToHexString((byte[])reader["SnapshotRowVer"]);
-            if (!versions.Any(item => item.RowVersion == rowVersion))
-                versions.Add(new("Cash.fnTaxBizBalanceSheetUK", rowVersion, null));
         }
         if (source is null)
             throw new InvalidOperationException($"Balance-sheet source '{taxSourceCode}' is not configured.");
+
+        // @@DBTS is deliberately not used as currentness evidence here. It is database-wide,
+        // so acquiring an unrelated Category Tree submission lock advances it and would make
+        // the exact accounts package invalidate itself. The prepared document already depends
+        // on this complete, ordered projection; use that deterministic projection as its token.
+        var canonicalProjection = string.Join("\n", values
+            .OrderBy(item => item.TagCode, StringComparer.Ordinal)
+            .Select(item => string.Join("|",
+                item.TagCode,
+                item.ValueState,
+                item.SupportStatus,
+                item.StatutoryAmount?.ToString("0.00000", CultureInfo.InvariantCulture) ?? string.Empty)));
+        var projectionToken = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(string.Join("|",
+                source,
+                returnedAsOf.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+                periodStart?.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture) ?? string.Empty,
+                validation,
+                canonicalProjection))));
+        versions.Add(new("Cash.fnTaxBizBalanceSheetUK", projectionToken, null));
+
         return new()
         {
             TaxSourceCode = source,
