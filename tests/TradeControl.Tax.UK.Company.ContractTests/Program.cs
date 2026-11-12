@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using System.Xml;
 using System.Xml.Linq;
@@ -248,6 +249,40 @@ Assert(xbrlSubmission.Descendants(ct + "InlineXBRLDocument").Count() == 2
 Assert(!serviceRoot.Content.SequenceEqual(ctXml.Content)
     && ctDocument.Descendants(ct + "Accounts").Single().Elements().Count() == 0,
     "The old diagnostic serializer was incorrectly promoted as the service artifact.");
+
+var fractionalComputation = computation with
+{
+    AccountsProfitLossBeforeTax = 211494.79428m,
+    AddBacks = [],
+    Deductions = [],
+    CapitalAllowances = new CapitalAllowanceSchedule(0m, 0m, 0m),
+    TaxableTotalProfits = 211494.79428m,
+    CorporationTaxChargeable = 40184.01091m,
+    TaxPayable = 40184.01091m
+};
+var fractionalReturn = ct600 with
+{
+    TaxableTotalProfits = fractionalComputation.TaxableTotalProfits,
+    CorporationTaxChargeable = fractionalComputation.CorporationTaxChargeable,
+    TaxPayable = fractionalComputation.TaxPayable
+};
+var fractionalServiceDocument = XDocument.Parse(Encoding.UTF8.GetString(serviceSerializer.Serialize(
+    new CorporationTaxReturnPackage(fractionalReturn, fractionalComputation, fullIx, computationIx, [])).Content));
+var financialYearTaxes = fractionalServiceDocument.Descendants(ct + "Details")
+    .Where(details => details.Parent?.Name == ct + "FinancialYearOne"
+        || details.Parent?.Name == ct + "FinancialYearTwo")
+    .Select(details => new
+    {
+        Profit = decimal.Parse(details.Element(ct + "Profit")!.Value, CultureInfo.InvariantCulture),
+        Rate = decimal.Parse(details.Element(ct + "TaxRate")!.Value, CultureInfo.InvariantCulture),
+        Tax = decimal.Parse(details.Element(ct + "Tax")!.Value, CultureInfo.InvariantCulture)
+    }).ToArray();
+Assert(financialYearTaxes.Length == 2
+    && financialYearTaxes.All(year => year.Tax == year.Profit * year.Rate / 100m),
+    "The CT600 financial-year tax does not reconcile to its whole-pound profit and percentage rate.");
+Assert(decimal.Parse(fractionalServiceDocument.Descendants(ct + "CorporationTax").Single().Value,
+           CultureInfo.InvariantCulture) == financialYearTaxes.Sum(year => year.Tax),
+    "The CT600 Corporation Tax total does not equal the financial-year charges.");
 var serviceValidator = new CorporationTaxServiceRootValidator();
 Assert(serviceValidator.Validate(serviceRoot.Content).IsValid,
     "The genuine CT service root failed the product RIM validator.");

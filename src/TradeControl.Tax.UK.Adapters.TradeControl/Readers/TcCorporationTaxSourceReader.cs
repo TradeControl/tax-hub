@@ -71,23 +71,23 @@ public sealed class TcCorporationTaxSourceReader : ICorporationTaxSource
 
             var turnover = Value(accounts, "IncomeStatement.Turnover");
             var depreciationExpense = Value(tax, "AddBacks.AccountingDepreciation");
-            var profitBeforeTax = turnover
-                + Value(accounts, "IncomeStatement.OtherIncome")
-                - Value(accounts, "IncomeStatement.CostOfSales")
-                - Value(accounts, "IncomeStatement.AdministrativeExpenses")
-                + depreciationExpense;
-            Require(profitBeforeTax == computation.NetProfit,
-                "The accounts projection does not reconcile to Cash.vwTaxBizTotalsByPeriod net profit.");
-            var depreciationAddBack = Math.Abs(depreciationExpense);
+            var profitBridge = CorporationTaxProfitBridge.Create(
+                turnover,
+                Value(accounts, "IncomeStatement.OtherIncome"),
+                Value(accounts, "IncomeStatement.CostOfSales"),
+                Value(accounts, "IncomeStatement.AdministrativeExpenses"),
+                depreciationExpense);
+            Require(profitBridge.AdjustedProfitBeforeOtherTaxAdjustments == computation.NetProfit,
+                "The accounting profit and depreciation add-back do not reconcile to Cash.vwTaxBizTotalsByPeriod net profit.");
             var addBacks = new List<StatutorySourceValue<TaxAdjustmentDraft>>
             {
-                new(new("Accounting depreciation", depreciationAddBack), StatutoryValueState.Source, "TradeControl", tax.Versions)
+                new(new("Accounting depreciation", profitBridge.DepreciationAddBack), StatutoryValueState.Source, "TradeControl", tax.Versions)
             };
             addBacks.AddRange(reviewed.OtherAddBacks.Select(value =>
                 new StatutorySourceValue<TaxAdjustmentDraft>(value, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", [])));
             var deductions = reviewed.Deductions.Select(value =>
                 new StatutorySourceValue<TaxAdjustmentDraft>(value, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", [])).ToArray();
-            var adjustedProfit = profitBeforeTax + addBacks.Sum(value => value.Value.Amount)
+            var adjustedProfit = profitBridge.AccountingProfitBeforeTax + addBacks.Sum(value => value.Value.Amount)
                 - deductions.Sum(value => value.Value.Amount)
                 - reviewed.CapitalAllowances.WritingDownAllowance
                 - reviewed.CapitalAllowances.AnnualInvestmentAllowance
@@ -108,7 +108,7 @@ public sealed class TcCorporationTaxSourceReader : ICorporationTaxSource
 
             periods.Add(new(period,
                 Source(turnover, accounts.Versions),
-                Derived(profitBeforeTax),
+                Derived(profitBridge.AccountingProfitBeforeTax),
                 addBacks,
                 deductions,
                 new(reviewed.CapitalAllowances, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", []),

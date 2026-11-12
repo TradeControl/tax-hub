@@ -69,6 +69,13 @@ try
 }
 catch (InvalidOperationException) { Assert(true, "Exclusive SQL end boundary is enforced."); }
 
+var corporationTaxProfitBridge = CorporationTaxProfitBridge.Create(
+    302321.79000m, 869.15000m, 55291.22572m, 37238.25400m, 833.33400m);
+Assert(corporationTaxProfitBridge.AccountingProfitBeforeTax == 210661.46028m
+    && corporationTaxProfitBridge.DepreciationAddBack == 833.33400m
+    && corporationTaxProfitBridge.AdjustedProfitBeforeOtherTaxAdjustments == 211494.79428m,
+    "Corporation Tax accounting profit and depreciation add-back were not kept distinct.");
+
 var connectionFileIndex = Array.IndexOf(args, "--connection-file");
 var connectionEnvironmentIndex = Array.IndexOf(args, "--connection-environment");
 if (connectionFileIndex >= 0 || connectionEnvironmentIndex >= 0)

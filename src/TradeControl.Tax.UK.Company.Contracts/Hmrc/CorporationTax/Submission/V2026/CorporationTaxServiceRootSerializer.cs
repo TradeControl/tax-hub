@@ -77,6 +77,8 @@ public sealed class CorporationTaxServiceRootSerializer
         var taxReturn = package.Return;
         var computation = package.Computation;
         var loans = taxReturn.SupplementaryPageA;
+        var rimCorporationTax = RimCorporationTax(computation);
+        var rimTaxPayable = PoundPence(Math.Max(0m, rimCorporationTax - computation.Reliefs));
         var loansTaxOutstanding = loans is null ? 0m : Math.Max(0m, loans.TaxChargeable - loans.TaxPaid);
         var deductions = computation.Losses.Used > 0m
             ? new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationDeductionsAndReliefs
@@ -124,15 +126,15 @@ public sealed class CorporationTaxServiceRootSerializer
                 },
                 ChargeableProfits = Whole(computation.TaxableTotalProfits),
                 CorporationTaxChargeable = TaxChargeable(computation),
-                CorporationTax = Pence(computation.CorporationTaxChargeable),
-                NetCorporationTaxChargeable = Pence(computation.CorporationTaxChargeable)
+                CorporationTax = Pence(rimCorporationTax),
+                NetCorporationTaxChargeable = Pence(rimCorporationTax)
             },
             CalculationOfTaxOutstandingOrOverpaid = new Rim.IRenvelopeCompanyTaxReturnCalculationOfTaxOutstandingOrOverpaid
             {
-                NetCorporationTaxLiability = Pence(computation.TaxPayable),
+                NetCorporationTaxLiability = Pence(rimTaxPayable),
                 LoansToParticipators = loans is not null ? Pence(loansTaxOutstanding) : null,
-                TaxChargeable = Pence(computation.TaxPayable + loansTaxOutstanding),
-                TaxPayable = Pence(computation.TaxPayable + loansTaxOutstanding)
+                TaxChargeable = Pence(rimTaxPayable + loansTaxOutstanding),
+                TaxPayable = Pence(rimTaxPayable + loansTaxOutstanding)
             },
             Declaration = new Rim.IRenvelopeCompanyTaxReturnDeclaration
             {
@@ -211,8 +213,7 @@ public sealed class CorporationTaxServiceRootSerializer
                 MidpointRounding.AwayFromZero));
         var secondProfit = WholePounds(totalProfit - firstProfit);
         var firstTax = PoundPence(firstProfit * computation.MainRate);
-        var totalTax = PoundPence(computation.CorporationTaxChargeable);
-        var secondTax = PoundPence(totalTax - firstTax);
+        var secondTax = PoundPence(secondProfit * computation.MainRate);
         var taxRate = WithTwoDecimalPlaces(computation.MainRate * 100m);
 
         return new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeable
@@ -302,6 +303,8 @@ public sealed class CorporationTaxServiceRootSerializer
 
     private static Rim.CTwholePoundStructure Whole(decimal value) => new() { Value = WholePounds(value) };
     private static Rim.CTpoundPenceStructure Pence(decimal value) => new() { Value = PoundPence(value) };
+    private static decimal RimCorporationTax(CompanyTaxComputation computation) =>
+        PoundPence(WholePounds(computation.TaxableTotalProfits) * computation.MainRate);
     private static decimal WholePounds(decimal value) => WithTwoDecimalPlaces(decimal.Truncate(value));
     private static decimal PoundPence(decimal value) => WithTwoDecimalPlaces(decimal.Truncate(value * 100m) / 100m);
     private static decimal WithTwoDecimalPlaces(decimal value) =>
