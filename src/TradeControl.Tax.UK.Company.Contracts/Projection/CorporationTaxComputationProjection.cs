@@ -29,6 +29,25 @@ public static class CorporationTaxComputationCatalog
             ["LossesCarriedForward"] = M("LossesCarriedForward", "BalanceOfLossesBroughtForwardCarriedForward", "instant"),
             ["ChargeableGains"] = M("ChargeableGains", "NetChargeableGains"),
             ["TaxableTotalProfits"] = M("TaxableTotalProfits", "TotalProfitsChargeableToCorporationTax"),
+            ["RelevantDistributions"] = M("RelevantDistributions", "ExemptABGHDistributions"),
+            ["MarginalRelief"] = M("MarginalRelief", "MarginalRateReliefForRingFenceTradesPayable"),
+            ["AssociatedCompanies"] = C("AssociatedCompanies", "NumberOfAssociatedCompaniesInThisPeriod", "integer", "duration"),
+            ["AssociatedCompaniesFY1"] = C("AssociatedCompaniesFY1", "NumberOfAssociatedCompaniesInFY1", "integer", "duration"),
+            ["AssociatedCompaniesFY2"] = C("AssociatedCompaniesFY2", "NumberOfAssociatedCompaniesInFY2", "integer", "duration"),
+            ["FinancialYear1"] = C("FinancialYear1", "FinancialYear1CoveredByTheReturn", "gYear", "duration"),
+            ["FinancialYear2"] = C("FinancialYear2", "FinancialYear2CoveredByTheReturn", "gYear", "duration"),
+            ["FY1ProfitFirstRate"] = M("FY1ProfitFirstRate", "FY1AmountOfProfitChargeableAtFirstRate"),
+            ["FY1ProfitSecondRate"] = M("FY1ProfitSecondRate", "FY1AmountOfProfitChargeableAtSecondRate"),
+            ["FY2ProfitFirstRate"] = M("FY2ProfitFirstRate", "FY2AmountOfProfitChargeableAtFirstRate"),
+            ["FY2ProfitSecondRate"] = M("FY2ProfitSecondRate", "FY2AmountOfProfitChargeableAtSecondRate"),
+            ["FY1FirstRate"] = C("FY1FirstRate", "FY1FirstRateOfTax", "decimal", "duration"),
+            ["FY1SecondRate"] = C("FY1SecondRate", "FY1SecondRateOfTax", "decimal", "duration"),
+            ["FY2FirstRate"] = C("FY2FirstRate", "FY2FirstRateOfTax", "decimal", "duration"),
+            ["FY2SecondRate"] = C("FY2SecondRate", "FY2SecondRateOfTax", "decimal", "duration"),
+            ["FY1TaxFirstRate"] = M("FY1TaxFirstRate", "FY1TaxAtFirstRate"),
+            ["FY1TaxSecondRate"] = M("FY1TaxSecondRate", "FY1TaxAtSecondRate"),
+            ["FY2TaxFirstRate"] = M("FY2TaxFirstRate", "FY2TaxAtFirstRate"),
+            ["FY2TaxSecondRate"] = M("FY2TaxSecondRate", "FY2TaxAtSecondRate"),
             ["CorporationTaxChargeable"] = M("CorporationTaxChargeable", "CorporationTaxChargeable"),
             ["TaxPayable"] = M("TaxPayable", "TaxPayable")
         });
@@ -88,8 +107,10 @@ public sealed class CorporationTaxComputationProjection
             new(taxonomy.Concepts[key].Name, context, new XbrlValue.Monetary(value), gbp, 2);
         XbrlFact V(string key, XbrlValue value, XbrlContext context) =>
             new(taxonomy.Concepts[key].Name, context, value);
-        return new("Corporation Tax computation", taxonomy,
-        [
+        XbrlFact N(string key, XbrlValue value, XbrlContext context, int decimals) =>
+            new(taxonomy.Concepts[key].Name, context, value, XbrlUnit.Pure, decimals);
+        var facts = new List<XbrlFact>
+        {
             V("CompanyName", new XbrlValue.Text(taxReturn.CompanyName, null), companyInstant),
             V("TaxReference", new XbrlValue.Text(taxReturn.Utr, null), companyInstant),
             V("PeriodOfAccountStartDate", new XbrlValue.Date(taxReturn.Period.Start), companyInstant),
@@ -109,8 +130,37 @@ public sealed class CorporationTaxComputationProjection
             M("ChargeableGains", computation.ChargeableGains, taxDuration),
             M("TaxableTotalProfits", computation.TaxableTotalProfits, taxDuration),
             M("CorporationTaxChargeable", computation.CorporationTaxChargeable, taxDuration),
-            M("TaxPayable", computation.TaxPayable, taxDuration)
-        ]);
+            M("TaxPayable", computation.TaxPayable, taxDuration),
+            M("RelevantDistributions", computation.Liability.RelevantDistributions, taxDuration),
+            N("AssociatedCompanies", new XbrlValue.Integer(computation.Liability.AssociatedCompanyCount), taxDuration, 0)
+        };
+        if (computation.Liability.MarginalRelief > 0m)
+            facts.Add(M("MarginalRelief", computation.Liability.MarginalRelief, taxDuration));
+        var allocation = CorporationTaxFinancialYearAllocation.Create(computation);
+        facts.Add(N("AssociatedCompaniesFY1",
+            new XbrlValue.Integer(computation.Liability.AssociatedCompanyCount), taxDuration, 0));
+        AddFinancialYear(allocation.Years[0], 1);
+        if (allocation.Years.Count > 1)
+        {
+            facts.Add(N("AssociatedCompaniesFY2",
+                new XbrlValue.Integer(computation.Liability.AssociatedCompanyCount), taxDuration, 0));
+            AddFinancialYear(allocation.Years[1], 2);
+        }
+        return new("Corporation Tax computation", taxonomy, facts);
+
+        void AddFinancialYear(CorporationTaxFinancialYearCharge charge, int number)
+        {
+            facts.Add(V($"FinancialYear{number}",
+                new XbrlValue.Text(charge.FinancialYear.ToString(), null), taxDuration));
+            foreach (var (band, index) in charge.Bands.Select((band, index) => (band, index)))
+            {
+                if (index > 1) throw new InvalidOperationException("The supported CT600 profile permits at most two ordinary Corporation Tax rates per financial year.");
+                var ordinal = index == 0 ? "First" : "Second";
+                facts.Add(M($"FY{number}Profit{ordinal}Rate", band.Profit, taxDuration));
+                facts.Add(N($"FY{number}{ordinal}Rate", new XbrlValue.Decimal(band.Rate * 100m), taxDuration, 2));
+                facts.Add(M($"FY{number}Tax{ordinal}Rate", band.Tax, taxDuration));
+            }
+        }
     }
 
     private static XbrlDimensionMember Dimension(string dimension, string member) =>

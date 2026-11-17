@@ -163,6 +163,32 @@ public sealed record CorporationTaxDeclarationSource(
     StatutorySourceValue<string> DeclarantName,
     StatutorySourceValue<DateOnly> DeclarationDate);
 
+public sealed record CorporationTaxLiabilitySource(
+    string JurisdictionCode,
+    string TaxSourceCode,
+    string ReportingProfileCode,
+    decimal RelevantDistributions,
+    decimal AugmentedProfits,
+    int AssociatedCompanyCount,
+    decimal MainRate,
+    decimal SmallProfitsRate,
+    decimal MarginalReliefFraction,
+    decimal LowerLimit,
+    decimal UpperLimit,
+    decimal AdjustedLowerLimit,
+    decimal AdjustedUpperLimit,
+    decimal TaxBeforeMarginalRelief,
+    decimal MarginalRelief,
+    decimal KernelCorporationTaxChargeable,
+    decimal BusinessTaxAdjustment,
+    decimal TaxDue,
+    string CalculationCode,
+    string? RateFindingCode,
+    string? ProfileFindingCode,
+    string? KernelFindingCode,
+    bool IsAccrualReady,
+    bool IsFilingReady);
+
 public sealed record CorporationTaxPeriodSource(
     ReportingWindow Period,
     StatutorySourceValue<decimal> Turnover,
@@ -173,7 +199,7 @@ public sealed record CorporationTaxPeriodSource(
     StatutorySourceValue<LossReliefDraft> LossRelief,
     StatutorySourceValue<decimal> ChargeableGains,
     StatutorySourceValue<decimal> TaxableTotalProfits,
-    StatutorySourceValue<decimal> MainRate,
+    StatutorySourceValue<CorporationTaxLiabilitySource> Liability,
     StatutorySourceValue<decimal> CorporationTaxChargeable,
     StatutorySourceValue<decimal> OtherReliefs,
     StatutorySourceValue<decimal> TaxPayable,

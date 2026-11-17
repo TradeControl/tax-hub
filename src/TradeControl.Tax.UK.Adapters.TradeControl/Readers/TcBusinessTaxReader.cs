@@ -255,4 +255,92 @@ FROM Cash.fnTaxBizComputation(@PeriodStart, @PeriodEnd);
             Versions = [new("Cash.fnTaxBizComputation", rowVersion, null)]
         };
     }
+
+    public async Task<TcCorporationTaxLiabilityProjection> ReadCorporationTaxLiabilityAsync(
+        string connectionString,
+        DateTime periodStart,
+        DateTime periodEnd,
+        CancellationToken cancellationToken = default)
+    {
+        const string sql = """
+SELECT PeriodStart, PeriodEnd, JurisdictionCode, TaxSourceCode, ReportingProfileCode,
+       TaxableResultBeforeRelief, OpeningLoss, LossCreated, LossUsed, ClosingLoss,
+       TaxableTotalProfits, RelevantDistributions, AugmentedProfits, AssociatedCompanyCount,
+       MainRate, SmallProfitsRate, MarginalReliefFraction, LowerLimit, UpperLimit,
+       AdjustedLowerLimit, AdjustedUpperLimit, TaxBeforeMarginalRelief, MarginalRelief,
+       CorporationTaxChargeable, BusinessTaxAdjustment, TaxDue, CalculationCode,
+       RateFindingCode, ProfileFindingCode, KernelFindingCode, IsAccrualReady, IsFilingReady
+FROM Cash.vwTaxCorpLiabilityUK
+WHERE PeriodStart = @PeriodStart
+  AND PeriodEnd = @PeriodEnd;
+""";
+        using var connection = _connectionFactory.Create(connectionString);
+        await SqlHelpers.EnsureOpenAsync(connection, cancellationToken);
+        using var command = new SqlCommand(sql, connection);
+        command.Parameters.AddWithValue("@PeriodStart", periodStart.Date);
+        command.Parameters.AddWithValue("@PeriodEnd", periodEnd.Date);
+        using var reader = await command.ExecuteReaderAsync(cancellationToken);
+        if (!await reader.ReadAsync(cancellationToken))
+            throw new InvalidOperationException(
+                $"No reviewed UK Corporation Tax liability exists for {periodStart:yyyy-MM-dd} to {periodEnd:yyyy-MM-dd} (inclusive).");
+
+        string? OptionalString(string name) => reader[name] == DBNull.Value
+            ? null
+            : SqlHelpers.GetString(reader, name);
+        var projection = new TcCorporationTaxLiabilityProjection
+        {
+            PeriodStart = SqlHelpers.GetDateTime(reader, "PeriodStart"),
+            PeriodEnd = SqlHelpers.GetDateTime(reader, "PeriodEnd"),
+            JurisdictionCode = SqlHelpers.GetString(reader, "JurisdictionCode"),
+            TaxSourceCode = SqlHelpers.GetString(reader, "TaxSourceCode"),
+            ReportingProfileCode = SqlHelpers.GetString(reader, "ReportingProfileCode"),
+            TaxableResultBeforeRelief = SqlHelpers.GetDecimal(reader, "TaxableResultBeforeRelief"),
+            OpeningLoss = SqlHelpers.GetDecimal(reader, "OpeningLoss"),
+            LossCreated = SqlHelpers.GetDecimal(reader, "LossCreated"),
+            LossUsed = SqlHelpers.GetDecimal(reader, "LossUsed"),
+            ClosingLoss = SqlHelpers.GetDecimal(reader, "ClosingLoss"),
+            TaxableTotalProfits = SqlHelpers.GetDecimal(reader, "TaxableTotalProfits"),
+            RelevantDistributions = SqlHelpers.GetDecimal(reader, "RelevantDistributions"),
+            AugmentedProfits = SqlHelpers.GetDecimal(reader, "AugmentedProfits"),
+            AssociatedCompanyCount = reader.GetInt32(reader.GetOrdinal("AssociatedCompanyCount")),
+            MainRate = SqlHelpers.GetDecimal(reader, "MainRate"),
+            SmallProfitsRate = SqlHelpers.GetDecimal(reader, "SmallProfitsRate"),
+            MarginalReliefFraction = SqlHelpers.GetDecimal(reader, "MarginalReliefFraction"),
+            LowerLimit = SqlHelpers.GetDecimal(reader, "LowerLimit"),
+            UpperLimit = SqlHelpers.GetDecimal(reader, "UpperLimit"),
+            AdjustedLowerLimit = SqlHelpers.GetDecimal(reader, "AdjustedLowerLimit"),
+            AdjustedUpperLimit = SqlHelpers.GetDecimal(reader, "AdjustedUpperLimit"),
+            TaxBeforeMarginalRelief = SqlHelpers.GetDecimal(reader, "TaxBeforeMarginalRelief"),
+            MarginalRelief = SqlHelpers.GetDecimal(reader, "MarginalRelief"),
+            CorporationTaxChargeable = SqlHelpers.GetDecimal(reader, "CorporationTaxChargeable"),
+            BusinessTaxAdjustment = SqlHelpers.GetDecimal(reader, "BusinessTaxAdjustment"),
+            TaxDue = SqlHelpers.GetDecimal(reader, "TaxDue"),
+            CalculationCode = SqlHelpers.GetString(reader, "CalculationCode"),
+            RateFindingCode = OptionalString("RateFindingCode"),
+            ProfileFindingCode = OptionalString("ProfileFindingCode"),
+            KernelFindingCode = OptionalString("KernelFindingCode"),
+            IsAccrualReady = reader.GetBoolean(reader.GetOrdinal("IsAccrualReady")),
+            IsFilingReady = reader.GetBoolean(reader.GetOrdinal("IsFilingReady"))
+        };
+
+        var canonical = string.Join("|", new object?[]
+        {
+            projection.PeriodStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            projection.PeriodEnd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            projection.JurisdictionCode, projection.TaxSourceCode, projection.ReportingProfileCode,
+            projection.TaxableResultBeforeRelief, projection.OpeningLoss, projection.LossCreated,
+            projection.LossUsed, projection.ClosingLoss, projection.TaxableTotalProfits,
+            projection.RelevantDistributions, projection.AugmentedProfits, projection.AssociatedCompanyCount,
+            projection.MainRate, projection.SmallProfitsRate, projection.MarginalReliefFraction,
+            projection.LowerLimit, projection.UpperLimit, projection.AdjustedLowerLimit,
+            projection.AdjustedUpperLimit, projection.TaxBeforeMarginalRelief, projection.MarginalRelief,
+            projection.CorporationTaxChargeable, projection.BusinessTaxAdjustment, projection.TaxDue,
+            projection.CalculationCode, projection.RateFindingCode, projection.ProfileFindingCode,
+            projection.KernelFindingCode, projection.IsAccrualReady, projection.IsFilingReady
+        }.Select(value => value is IFormattable formattable
+            ? formattable.ToString(null, CultureInfo.InvariantCulture)
+            : value?.ToString() ?? string.Empty));
+        var token = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
+        return projection with { Versions = [new("Cash.vwTaxCorpLiabilityUK", token, null)] };
+    }
 }

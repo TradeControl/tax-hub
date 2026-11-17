@@ -23,6 +23,11 @@ public sealed class CorporationTaxPopulator
 
         return source.CorporationTaxPeriods.Select(period =>
         {
+            var liability = period.Liability.Value;
+            Require(liability.IsFilingReady, liability.RateFindingCode
+                ?? liability.ProfileFindingCode
+                ?? liability.KernelFindingCode
+                ?? "The Corporation Tax liability is not filing-ready.");
             var computation = new CorporationTaxComputation(
                 Period(period.Period),
                 period.AccountsProfitLossBeforeTax.Value,
@@ -37,7 +42,22 @@ public sealed class CorporationTaxPopulator
                     period.LossRelief.Value.CarriedForward),
                 period.ChargeableGains.Value,
                 period.TaxableTotalProfits.Value,
-                period.MainRate.Value,
+                new(
+                    liability.RelevantDistributions,
+                    liability.AugmentedProfits,
+                    liability.AssociatedCompanyCount,
+                    liability.MainRate,
+                    liability.SmallProfitsRate,
+                    liability.MarginalReliefFraction,
+                    liability.LowerLimit,
+                    liability.UpperLimit,
+                    liability.AdjustedLowerLimit,
+                    liability.AdjustedUpperLimit,
+                    liability.TaxBeforeMarginalRelief,
+                    liability.MarginalRelief,
+                    liability.KernelCorporationTaxChargeable,
+                    liability.BusinessTaxAdjustment,
+                    liability.CalculationCode),
                 period.CorporationTaxChargeable.Value,
                 period.OtherReliefs.Value,
                 period.TaxPayable.Value);

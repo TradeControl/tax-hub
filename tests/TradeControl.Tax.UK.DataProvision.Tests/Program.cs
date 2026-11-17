@@ -9,6 +9,7 @@ NativeTestProcess.SetErrorMode(NativeTestProcess.SemNoGpFaultErrorBox);
 
 CompanySourceBoundaryTests.Run();
 CompanyAccountsPopulationTests.Run();
+CorporationTaxPopulationTests.Run();
 PreparedArtifactTests.Run();
 await CorporateHandoffTests.RunAsync();
 
@@ -234,16 +235,23 @@ if (snapshot.Identity.BusinessTaxTypeCode == 0)
     Assert(corporationTaxPeriod.AccountsProfitLossBeforeTax.Value
         == companySource.IncomeStatement.ProfitLossForPeriod.Current.Value,
         "Corporation Tax accounting profit does not reconcile to the zero-tax accounts source.");
-    Assert(corporationTaxPeriod.CorporationTaxChargeable.Value
-        == decimal.Round(corporationTaxPeriod.TaxableTotalProfits.Value * corporationTaxPeriod.MainRate.Value, 5, MidpointRounding.AwayFromZero),
-        "Corporation Tax chargeable does not reconcile to taxable profits and the source rate.");
+    Assert(corporationTaxPeriod.Liability.Value.AugmentedProfits
+        == corporationTaxPeriod.TaxableTotalProfits.Value + corporationTaxPeriod.Liability.Value.RelevantDistributions,
+        "Corporation Tax augmented profits do not reconcile to N plus D.");
     var masterTax = await new TcBusinessTaxReader(factory).ReadCorporationTaxAsync(
         connectionString,
         corporationTaxPeriod.Period.Start.ToDateTime(TimeOnly.MinValue),
         corporationTaxPeriod.Period.End.AddDays(1).ToDateTime(TimeOnly.MinValue));
-    Assert(corporationTaxPeriod.MainRate.State == StatutoryValueState.Source
-        && corporationTaxPeriod.MainRate.Value == masterTax.BusinessTaxRate,
-        "Corporation Tax did not use the App.tbYearPeriod source rate.");
+    var reviewedLiability = await new TcBusinessTaxReader(factory).ReadCorporationTaxLiabilityAsync(
+        connectionString,
+        corporationTaxPeriod.Period.Start.ToDateTime(TimeOnly.MinValue),
+        corporationTaxPeriod.Period.End.ToDateTime(TimeOnly.MinValue));
+    Assert(corporationTaxPeriod.Liability.State == StatutoryValueState.Source
+        && corporationTaxPeriod.Liability.Value.MainRate == reviewedLiability.MainRate
+        && corporationTaxPeriod.Liability.Value.SmallProfitsRate == reviewedLiability.SmallProfitsRate
+        && corporationTaxPeriod.Liability.Value.MarginalRelief == reviewedLiability.MarginalRelief
+        && corporationTaxPeriod.Liability.Value.CalculationCode == reviewedLiability.CalculationCode,
+        "Corporation Tax did not preserve the reviewed liability components.");
     Assert(corporationTaxPeriod.CorporationTaxChargeable.Value == Math.Max(0m, masterTax.StatementTaxDue)
         && corporationTaxPeriod.TaxPaid.Value == Math.Abs(masterTax.StatementTaxPaid)
         && corporationTaxPeriod.StatementBalance.Value == masterTax.StatementBalance,
@@ -253,6 +261,28 @@ if (snapshot.Identity.BusinessTaxTypeCode == 0)
     var populatedTax = new CorporationTaxPopulator().Populate(corporationTaxSource).Single();
     Assert(populatedTax.Return.TaxPayable == populatedTax.Computation.TaxPayable,
         "The populated CT600 does not reconcile to the computation.");
+    var provisionalLiability = corporationTaxPeriod.Liability.Value with
+    {
+        RateFindingCode = "CT-RATE-PROVISIONAL",
+        IsFilingReady = false
+    };
+    var provisionalPeriod = corporationTaxPeriod with
+    {
+        Liability = corporationTaxPeriod.Liability with { Value = provisionalLiability }
+    };
+    try
+    {
+        _ = new CorporationTaxPopulator().Populate(corporationTaxSource with
+        {
+            CorporationTaxPeriods = [provisionalPeriod]
+        });
+        throw new InvalidOperationException("A provisional rate reached CT artifact preparation.");
+    }
+    catch (InvalidOperationException exception) when (
+        exception.Message.Contains("CT-RATE-PROVISIONAL", StringComparison.Ordinal))
+    {
+        // Expected: provisional rates may support accruals but cannot produce a filing artifact.
+    }
 
     var taxDefaults = CorporationTaxDraftDefaults.Create(snapshot);
     Assert(taxDefaults.OtherAddBacks.Value.Count == 0

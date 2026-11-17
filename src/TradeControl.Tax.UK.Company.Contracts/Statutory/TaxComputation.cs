@@ -16,6 +16,23 @@ public sealed record LossReliefSchedule(
     decimal Used,
     decimal CarriedForward);
 
+public sealed record CorporationTaxLiabilityCalculation(
+    decimal RelevantDistributions,
+    decimal AugmentedProfits,
+    int AssociatedCompanyCount,
+    decimal MainRate,
+    decimal SmallProfitsRate,
+    decimal MarginalReliefFraction,
+    decimal LowerLimit,
+    decimal UpperLimit,
+    decimal AdjustedLowerLimit,
+    decimal AdjustedUpperLimit,
+    decimal TaxBeforeMarginalRelief,
+    decimal MarginalRelief,
+    decimal KernelCorporationTaxChargeable,
+    decimal BusinessTaxAdjustment,
+    string CalculationCode);
+
 public sealed record CorporationTaxComputation(
     ReportingPeriod CorporationTaxPeriod,
     decimal AccountsProfitLossBeforeTax,
@@ -25,11 +42,13 @@ public sealed record CorporationTaxComputation(
     LossReliefSchedule Losses,
     decimal ChargeableGains,
     decimal TaxableTotalProfits,
-    decimal MainRate,
+    CorporationTaxLiabilityCalculation Liability,
     decimal CorporationTaxChargeable,
     decimal Reliefs,
     decimal TaxPayable)
 {
+    public decimal MainRate => Liability.MainRate;
+
     public decimal AdjustedTradingProfit => AccountsProfitLossBeforeTax
         + AddBacks.Sum(x => x.Amount)
         - Deductions.Sum(x => x.Amount)

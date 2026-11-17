@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text;
 using System.Xml;
 using System.Xml.Serialization;
+using TradeControl.Tax.UK.Company.Statutory;
 using TradeControl.Tax.UK.Company.Xbrl;
 using Ct = TradeControl.Tax.UK.Hmrc.CorporationTax.Ct600.V2026;
 using CompanyTaxComputation = TradeControl.Tax.UK.Company.Statutory.CorporationTaxComputation;
@@ -77,7 +78,10 @@ public sealed class CorporationTaxServiceRootSerializer
         var taxReturn = package.Return;
         var computation = package.Computation;
         var loans = taxReturn.SupplementaryPageA;
-        var rimCorporationTax = RimCorporationTax(computation);
+        var rimCorporationTaxBeforeMarginalRelief = RimCorporationTax(computation);
+        var rimMarginalRelief = RimMarginalRelief(computation);
+        var rimCorporationTax = PoundPence(Math.Max(0m,
+            rimCorporationTaxBeforeMarginalRelief - rimMarginalRelief));
         var rimTaxPayable = PoundPence(Math.Max(0m, rimCorporationTax - computation.Reliefs));
         var loansTaxOutstanding = loans is null ? 0m : Math.Max(0m, loans.TaxChargeable - loans.TaxPaid);
         var deductions = computation.Losses.Used > 0m
@@ -126,7 +130,10 @@ public sealed class CorporationTaxServiceRootSerializer
                 },
                 ChargeableProfits = Whole(computation.TaxableTotalProfits),
                 CorporationTaxChargeable = TaxChargeable(computation),
-                CorporationTax = Pence(rimCorporationTax),
+                CorporationTax = Pence(rimCorporationTaxBeforeMarginalRelief),
+                MarginalReliefForRingFenceTrades = rimMarginalRelief > 0m
+                    ? new Rim.CT_CTnonZeroPoundPenceStructure { Value = rimMarginalRelief }
+                    : null,
                 NetCorporationTaxChargeable = Pence(rimCorporationTax)
             },
             CalculationOfTaxOutstandingOrOverpaid = new Rim.IRenvelopeCompanyTaxReturnCalculationOfTaxOutstandingOrOverpaid
@@ -136,6 +143,12 @@ public sealed class CorporationTaxServiceRootSerializer
                 TaxChargeable = Pence(rimTaxPayable + loansTaxOutstanding),
                 TaxPayable = Pence(rimTaxPayable + loansTaxOutstanding)
             },
+            IndicatorsAndInformation = computation.Liability.RelevantDistributions > 0m
+                ? new Rim.IRenvelopeCompanyTaxReturnIndicatorsAndInformation
+                {
+                    FrankedInvestmentIncome = Whole(computation.Liability.RelevantDistributions)
+                }
+                : null,
             Declaration = new Rim.IRenvelopeCompanyTaxReturnDeclaration
             {
                 AcceptDeclaration = Rim.IRenvelopeCompanyTaxReturnDeclarationAcceptDeclaration.yes,
@@ -199,59 +212,43 @@ public sealed class CorporationTaxServiceRootSerializer
     private static Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeable TaxChargeable(
         CompanyTaxComputation computation)
     {
-        var period = computation.CorporationTaxPeriod;
-        var firstYear = FinancialYear(period.Start);
-        var firstEnd = new DateOnly(firstYear + 1, 3, 31);
-        var firstDays = Math.Min(period.InclusiveDays,
-            (period.End < firstEnd ? period.End : firstEnd).DayNumber - period.Start.DayNumber + 1);
-        var totalProfit = WholePounds(computation.TaxableTotalProfits);
-        var firstProfit = firstDays == period.InclusiveDays
-            ? totalProfit
-            : WholePounds(decimal.Round(
-                totalProfit * firstDays / period.InclusiveDays,
-                0,
-                MidpointRounding.AwayFromZero));
-        var secondProfit = WholePounds(totalProfit - firstProfit);
-        var firstTax = PoundPence(firstProfit * computation.MainRate);
-        var secondTax = PoundPence(secondProfit * computation.MainRate);
-        var taxRate = WithTwoDecimalPlaces(computation.MainRate * 100m);
+        var liability = computation.Liability;
+        var allocation = CorporationTaxFinancialYearAllocation.Create(computation);
+        var first = allocation.Years[0];
+        var second = allocation.Years.Count > 1 ? allocation.Years[1] : null;
+        Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeableFinancialYearOneDetails FirstDetails(
+            CorporationTaxRateBand band) => new()
+            {
+                Profit = Whole(band.Profit),
+                TaxRate = WithTwoDecimalPlaces(band.Rate * 100m),
+                Tax = Pence(band.Tax)
+            };
+        Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeableFinancialYearTwoDetails SecondDetails(
+            CorporationTaxRateBand band) => new()
+            {
+                Profit = Whole(band.Profit),
+                TaxRate = WithTwoDecimalPlaces(band.Rate * 100m),
+                Tax = Pence(band.Tax)
+            };
 
         return new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeable
         {
-            AssociatedCompanies = computation.MainRate == 0.19m && firstYear >= 2023
-                ? new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeableAssociatedCompanies
-                {
-                    ThisPeriod = "0",
-                    StartingOrSmallCompaniesRate = Rim.CT_YesType.yes,
-                    StartingOrSmallCompaniesRateSpecified = true
-                }
-                : null,
+            AssociatedCompanies = new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeableAssociatedCompanies
+            {
+                ThisPeriod = liability.AssociatedCompanyCount.ToString(CultureInfo.InvariantCulture),
+                StartingOrSmallCompaniesRate = Rim.CT_YesType.yes,
+                StartingOrSmallCompaniesRateSpecified = liability.CalculationCode is "SMALL-PROFITS" or "MARGINAL-RELIEF"
+            },
             FinancialYearOne = new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeableFinancialYearOne
             {
-                Year = firstYear.ToString(CultureInfo.InvariantCulture),
-                Details =
-                [
-                    new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeableFinancialYearOneDetails
-                    {
-                        Profit = Whole(firstProfit),
-                        TaxRate = taxRate,
-                        Tax = Pence(firstTax)
-                    }
-                ]
+                Year = first.FinancialYear.ToString(CultureInfo.InvariantCulture),
+                Details = first.Bands.Select(FirstDetails).ToArray()
             },
-            FinancialYearTwo = secondProfit > 0m
+            FinancialYearTwo = second is not null
                 ? new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeableFinancialYearTwo
                 {
-                    Year = (firstYear + 1).ToString(CultureInfo.InvariantCulture),
-                    Details =
-                    [
-                        new Rim.IRenvelopeCompanyTaxReturnCompanyTaxCalculationCorporationTaxChargeableFinancialYearTwoDetails
-                        {
-                            Profit = Whole(secondProfit),
-                            TaxRate = taxRate,
-                            Tax = Pence(secondTax)
-                        }
-                    ]
+                    Year = second.FinancialYear.ToString(CultureInfo.InvariantCulture),
+                    Details = second.Bands.Select(SecondDetails).ToArray()
                 }
                 : null
         };
@@ -304,10 +301,24 @@ public sealed class CorporationTaxServiceRootSerializer
     private static Rim.CTwholePoundStructure Whole(decimal value) => new() { Value = WholePounds(value) };
     private static Rim.CTpoundPenceStructure Pence(decimal value) => new() { Value = PoundPence(value) };
     private static decimal RimCorporationTax(CompanyTaxComputation computation) =>
-        PoundPence(WholePounds(computation.TaxableTotalProfits) * computation.MainRate);
+        CorporationTaxFinancialYearAllocation.Create(computation).CorporationTax;
+    private static decimal RimMarginalRelief(CompanyTaxComputation computation)
+    {
+        var liability = computation.Liability;
+        if (liability.CalculationCode != "MARGINAL-RELIEF") return 0m;
+
+        var taxableTotalProfits = WholePounds(computation.TaxableTotalProfits);
+        var relevantDistributions = WholePounds(liability.RelevantDistributions);
+        var augmentedProfits = taxableTotalProfits + relevantDistributions;
+        if (taxableTotalProfits <= 0m || augmentedProfits <= 0m) return 0m;
+
+        var relief = liability.MarginalReliefFraction
+            * Math.Max(0m, liability.AdjustedUpperLimit - augmentedProfits)
+            * taxableTotalProfits / augmentedProfits;
+        return WithTwoDecimalPlaces(decimal.Round(relief, 2, MidpointRounding.AwayFromZero));
+    }
     private static decimal WholePounds(decimal value) => WithTwoDecimalPlaces(decimal.Truncate(value));
     private static decimal PoundPence(decimal value) => WithTwoDecimalPlaces(decimal.Truncate(value * 100m) / 100m);
     private static decimal WithTwoDecimalPlaces(decimal value) =>
         decimal.Parse(value.ToString("0.00", CultureInfo.InvariantCulture), CultureInfo.InvariantCulture);
-    private static int FinancialYear(DateOnly date) => date.Month >= 4 ? date.Year : date.Year - 1;
 }

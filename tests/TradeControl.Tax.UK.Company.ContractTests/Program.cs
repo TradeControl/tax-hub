@@ -229,7 +229,7 @@ var serviceSerializer = new CorporationTaxServiceRootSerializer();
 var serviceRoot = serviceSerializer.Serialize(ctPackage);
 Assert(serviceRoot.Content.SequenceEqual(serviceSerializer.Serialize(ctPackage).Content),
     "Corporation Tax service-root serialization is not deterministic.");
-Assert(serviceRoot.Sha256 == "A3F3729F7236B342FC8C6D10C423104EA9B6F7C86CE86C396D78B2D586A77F2F",
+Assert(serviceRoot.Sha256 == "6EAF0C1A0A1A85452FBCA2449498723BB614C508FF99E0E13FEA720043FDFC87",
     $"The reviewed CT600 service-root golden changed to {serviceRoot.Sha256}.");
 Assert(fullIx.Sha256 == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(fullIx.Content))
     && computationIx.Sha256 == Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(computationIx.Content)),
@@ -283,6 +283,58 @@ Assert(financialYearTaxes.Length == 2
 Assert(decimal.Parse(fractionalServiceDocument.Descendants(ct + "CorporationTax").Single().Value,
            CultureInfo.InvariantCulture) == financialYearTaxes.Sum(year => year.Tax),
     "The CT600 Corporation Tax total does not equal the financial-year charges.");
+
+var marginalRelief = 1909.09091m;
+var marginalComputation = new CorporationTaxComputation(
+    accounts.Period,
+    110000m,
+    [],
+    [new TaxAdjustment("Relevant distributions", 10000m)],
+    new(0m, 0m, 0m),
+    new(0m, 0m, 0m, 0m),
+    0m,
+    100000m,
+    new(10000m, 110000m, 0, 0.25m, 0.19m, 0.015m,
+        50000m, 250000m, 50000m, 250000m,
+        25000m, marginalRelief, 23090.90909m, 0m, "MARGINAL-RELIEF"),
+    23090.90909m,
+    0m,
+    23090.90909m);
+var marginalReturn = ct600 with
+{
+    ProfitBeforeTax = 110000m,
+    TaxableTotalProfits = 100000m,
+    CorporationTaxChargeable = 23090.90909m,
+    TaxPayable = 23090.90909m,
+    SupplementaryPageA = null
+};
+var marginalPackage = new CorporationTaxReturnPackage(
+    marginalReturn, marginalComputation, fullIx, computationIx, []);
+Assert(validator.Validate(marginalPackage).IsValid,
+    "A reconciled D > 0 marginal-relief computation was rejected.");
+var marginalService = serviceSerializer.Serialize(marginalPackage);
+var marginalServiceDocument = XDocument.Parse(Encoding.UTF8.GetString(marginalService.Content));
+var marginalRates = marginalServiceDocument.Descendants(ct + "Details")
+    .Select(details => decimal.Parse(details.Element(ct + "TaxRate")!.Value, CultureInfo.InvariantCulture))
+    .Distinct()
+    .Order()
+    .ToArray();
+Assert(marginalRates.SequenceEqual([25m])
+    && marginalServiceDocument.Descendants(ct + "ThisPeriod").Single().Value == "0"
+    && decimal.Parse(marginalServiceDocument.Descendants(ct + "FrankedInvestmentIncome").Single().Value,
+        CultureInfo.InvariantCulture) == 10000m
+    && marginalServiceDocument.Descendants(ct + "StartingOrSmallCompaniesRate").Single().Value == "yes"
+    && decimal.Parse(marginalServiceDocument.Descendants(ct + "CorporationTax").Single().Value,
+        CultureInfo.InvariantCulture) == 25000m
+    && decimal.Parse(marginalServiceDocument.Descendants(ct + "MarginalReliefForRingFenceTrades").Single().Value,
+        CultureInfo.InvariantCulture) == 1909.09m
+    && decimal.Parse(marginalServiceDocument.Descendants(ct + "NetCorporationTaxChargeable").Single().Value,
+        CultureInfo.InvariantCulture) == 23090.91m,
+    "The CT600 did not carry the explicit marginal-relief branch and associated-company facts.");
+Assert(new CorporationTaxServiceRootValidator().Validate(marginalService.Content).IsValid,
+    "The marginal-relief CT600 failed the product RIM validator.");
+AssertSchemaValid(marginalService.Content,
+    Path.Combine(AppContext.BaseDirectory, "Fixtures", "CorporationTax", "CT-2014-v1-994.xsd"));
 var serviceValidator = new CorporationTaxServiceRootValidator();
 Assert(serviceValidator.Validate(serviceRoot.Content).IsValid,
     "The genuine CT service root failed the product RIM validator.");
@@ -434,4 +486,9 @@ static CorporationTaxComputation FixtureComputation(ReportingPeriod period) => n
     [new TaxAdjustment("Non-trading income", 1000m)],
     new CapitalAllowanceSchedule(2000m, 0m, 0m),
     new LossReliefSchedule(0m, 0m, 0m, 0m),
-    0m, 30000m, 0.19m, 5700m, 0m, 5700m);
+    0m, 30000m,
+    new CorporationTaxLiabilityCalculation(
+        0m, 30000m, 0, 0.25m, 0.19m, 0.015m,
+        50000m, 250000m, 50000m, 250000m,
+        5700m, 0m, 5700m, 0m, "SMALL-PROFITS"),
+    5700m, 0m, 5700m);

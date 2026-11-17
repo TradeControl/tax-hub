@@ -66,10 +66,34 @@ public sealed class CompanyContractValidator
     {
         var f = new List<ValidationFinding>();
         var computation = package.Computation;
+        var liability = computation.Liability;
         var expectedTaxableProfits = Math.Max(0m,
             computation.AdjustedTradingProfit + computation.ChargeableGains - computation.Losses.Used);
-        var expectedChargeable = decimal.Round(
-            expectedTaxableProfits * computation.MainRate, 5, MidpointRounding.AwayFromZero);
+        var expectedAugmentedProfits = computation.TaxableTotalProfits + liability.RelevantDistributions;
+        var periodFraction = computation.CorporationTaxPeriod.InclusiveDays >= 365
+            ? 1m
+            : computation.CorporationTaxPeriod.InclusiveDays / 365m;
+        var divisor = liability.AssociatedCompanyCount + 1m;
+        var expectedLowerLimit = Round(liability.LowerLimit * periodFraction / divisor);
+        var expectedUpperLimit = Round(liability.UpperLimit * periodFraction / divisor);
+        var expectedCalculationCode = computation.TaxableTotalProfits == 0m
+            ? "NO-TAX"
+            : expectedAugmentedProfits <= expectedLowerLimit
+                ? "SMALL-PROFITS"
+                : expectedAugmentedProfits <= expectedUpperLimit
+                    ? "MARGINAL-RELIEF"
+                    : "MAIN-RATE";
+        var expectedTaxBeforeRelief = Round(computation.TaxableTotalProfits == 0m
+            ? 0m
+            : computation.TaxableTotalProfits * (expectedAugmentedProfits <= expectedLowerLimit
+                ? liability.SmallProfitsRate
+                : liability.MainRate));
+        var expectedMarginalRelief = expectedCalculationCode == "MARGINAL-RELIEF"
+            ? Round(liability.MarginalReliefFraction * (expectedUpperLimit - expectedAugmentedProfits)
+                * computation.TaxableTotalProfits / expectedAugmentedProfits)
+            : 0m;
+        var expectedKernelChargeable = Round(expectedTaxBeforeRelief - expectedMarginalRelief);
+        var expectedChargeable = Round(expectedKernelChargeable + liability.BusinessTaxAdjustment);
         var expectedPayable = Math.Max(0m, expectedChargeable - computation.Reliefs);
         Add(package.Return.Period != package.Computation.CorporationTaxPeriod, "CT001", "CT600 and computation periods differ.", "Return.Period");
         Add(package.Return.ProfitBeforeTax != package.Computation.AccountsProfitLossBeforeTax, "CT002", "CT600 profit does not reconcile to computation.", "Return.ProfitBeforeTax");
@@ -83,13 +107,35 @@ public sealed class CompanyContractValidator
             "CT009", "The loss-relief schedule does not reconcile.", "Computation.Losses");
         Add(computation.TaxableTotalProfits != expectedTaxableProfits,
             "CT010", "Taxable total profits do not reconcile to adjusted profit, gains and losses used.", "Computation.TaxableTotalProfits");
-        Add(computation.MainRate is < 0m or > 1m, "CT011", "The Corporation Tax rate must be between zero and one.", "Computation.MainRate");
+        Add(liability.MainRate is < 0m or > 1m
+            || liability.SmallProfitsRate < 0m
+            || liability.SmallProfitsRate > liability.MainRate,
+            "CT011", "The Corporation Tax rates are invalid.", "Computation.Liability");
         Add(computation.CorporationTaxChargeable != expectedChargeable,
-            "CT012", "Corporation Tax chargeable does not reconcile to taxable profits and rate.", "Computation.CorporationTaxChargeable");
+            "CT012", "Corporation Tax chargeable does not reconcile to the reviewed liability components.", "Computation.CorporationTaxChargeable");
         Add(computation.TaxPayable != expectedPayable,
             "CT013", "Tax payable does not reconcile to Corporation Tax chargeable and reliefs.", "Computation.TaxPayable");
         Add(package.Return.DeclarationDate < package.Return.Period.End,
             "CT014", "The CT600 declaration cannot precede the return period end.", "Return.DeclarationDate");
+        Add(liability.RelevantDistributions < 0m
+            || liability.AugmentedProfits != expectedAugmentedProfits,
+            "CT015", "Augmented profits must reconcile to taxable total profits plus relevant distributions.", "Computation.Liability.AugmentedProfits");
+        Add(liability.AssociatedCompanyCount < 0,
+            "CT016", "The associated-company count cannot be negative.", "Computation.Liability.AssociatedCompanyCount");
+        Add(liability.LowerLimit <= 0m || liability.UpperLimit <= liability.LowerLimit
+            || liability.MarginalReliefFraction is < 0m or > 1m,
+            "CT017", "The marginal-relief limits or standard fraction are invalid.", "Computation.Liability");
+        Add(liability.AdjustedLowerLimit != expectedLowerLimit
+            || liability.AdjustedUpperLimit != expectedUpperLimit,
+            "CT018", "The adjusted marginal-relief limits do not reconcile to the period and associated-company count.", "Computation.Liability");
+        Add(liability.CalculationCode != expectedCalculationCode,
+            "CT019", "The Corporation Tax calculation branch does not reconcile to augmented profits.", "Computation.Liability.CalculationCode");
+        Add(liability.TaxBeforeMarginalRelief != expectedTaxBeforeRelief
+            || liability.MarginalRelief != expectedMarginalRelief
+            || liability.KernelCorporationTaxChargeable != expectedKernelChargeable,
+            "CT020", "The reviewed marginal-relief calculation components do not reconcile.", "Computation.Liability");
+        Add(liability.BusinessTaxAdjustment != 0m,
+            "CT021", "A manual tax accrual adjustment cannot be represented as a CT600 statutory-rate charge.", "Computation.Liability.BusinessTaxAdjustment");
         if (package.Return.SupplementaryPageA is { } a)
         {
             Add(a.LoansOutstandingAtPeriodEnd > 0 && a.TaxChargeable <= 0, "CT600A001", "Loans outstanding require a positive section 455 charge in the supported profile.", "Return.SupplementaryPageA.TaxChargeable");
@@ -97,6 +143,8 @@ public sealed class CompanyContractValidator
                 "CT600A002", "CT600A monetary values cannot be negative.", "Return.SupplementaryPageA");
         }
         return new(f);
+        static decimal Round(decimal value) =>
+            decimal.Round(value, 5, MidpointRounding.AwayFromZero);
         void Add(bool condition, string code, string message, string path) { if (condition) f.Add(new(ValidationSeverity.Error, code, message, path, "CT600-RIM-1.994-supported-profile")); }
     }
 
@@ -105,8 +153,9 @@ public sealed class CompanyContractValidator
         var f = new List<ValidationFinding>();
         foreach (var fact in report.Facts)
         {
-            if (fact.Value is XbrlValue.Monetary && fact.Unit is null)
-                f.Add(new(ValidationSeverity.Error, "XBRL001", "A monetary fact requires a unit.", fact.Concept.ToString(), report.Taxonomy.ReleaseId));
+            if ((fact.Value is XbrlValue.Monetary or XbrlValue.Decimal or XbrlValue.Integer)
+                && fact.Unit is null)
+                f.Add(new(ValidationSeverity.Error, "XBRL001", "A numeric fact requires a unit.", fact.Concept.ToString(), report.Taxonomy.ReleaseId));
             if (!report.Taxonomy.Concepts.Values.Any(x => x.Name == fact.Concept))
                 f.Add(new(ValidationSeverity.Error, "XBRL002", "Fact concept is not in the selected supported catalog.", fact.Concept.ToString(), report.Taxonomy.ReleaseId));
         }

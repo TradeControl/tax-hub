@@ -48,17 +48,24 @@ public sealed class TcCorporationTaxSourceReader : ICorporationTaxSource
                 period.Start.ToDateTime(TimeOnly.MinValue), exclusiveEnd, cancellationToken);
             var computation = await _taxReader.ReadCorporationTaxAsync(_connectionString,
                 period.Start.ToDateTime(TimeOnly.MinValue), exclusiveEnd, cancellationToken);
+            var liability = await _taxReader.ReadCorporationTaxLiabilityAsync(_connectionString,
+                period.Start.ToDateTime(TimeOnly.MinValue), period.End.ToDateTime(TimeOnly.MinValue), cancellationToken);
             Require(accounts.ValidationStatus == TcTaxValidationStatus.Ready, "The accounts projection is not ready for Corporation Tax.");
             Require(tax.ValidationStatus == TcTaxValidationStatus.Ready, "The Corporation Tax projection is not ready.");
-            Require(computation.BusinessTaxRate is not null,
-                "The Corporation Tax period does not have a configured effective business-tax rate.");
-            var businessTaxRate = computation.BusinessTaxRate
-                ?? throw new InvalidOperationException("The Corporation Tax rate is missing.");
-            Require(computation.CalculatedTaxDue == computation.StatementTaxDue,
-                "The calculated Corporation Tax does not reconcile to Cash.vwTaxBizStatement.");
+            Require(liability.RateFindingCode is null, liability.RateFindingCode
+                ?? "The Corporation Tax rate parameters are not filing-ready.");
+            Require(liability.ProfileFindingCode is null, liability.ProfileFindingCode
+                ?? "The Corporation Tax reporting profile is not filing-ready.");
+            Require(liability.KernelFindingCode is null, liability.KernelFindingCode
+                ?? "The Corporation Tax liability calculation is invalid.");
+            Require(liability.IsFilingReady,
+                "The Corporation Tax liability is not filing-ready.");
+            Require(liability.TaxDue == Math.Max(0m, computation.StatementTaxDue),
+                "The reviewed Corporation Tax liability does not reconcile to Cash.vwTaxBizStatement.");
             versions.AddRange(accounts.Versions);
             versions.AddRange(tax.Versions);
             versions.AddRange(computation.Versions);
+            versions.AddRange(liability.Versions);
 
             decimal Value(TcCumulativeProjection projection, string tag) => projection.Values.Single(value =>
                 value.TagCode == tag && value.SupportStatus == TcTaxSupportStatus.Supported).StatutoryAmount!.Value;
@@ -86,25 +93,52 @@ public sealed class TcCorporationTaxSourceReader : ICorporationTaxSource
             addBacks.AddRange(reviewed.OtherAddBacks.Select(value =>
                 new StatutorySourceValue<TaxAdjustmentDraft>(value, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", [])));
             var deductions = reviewed.Deductions.Select(value =>
-                new StatutorySourceValue<TaxAdjustmentDraft>(value, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", [])).ToArray();
+                new StatutorySourceValue<TaxAdjustmentDraft>(value, StatutoryValueState.ReviewedFilingInput, "SubmissionOperator", [])).ToList();
+            if (liability.RelevantDistributions != 0m)
+                deductions.Insert(0, new(new("Relevant distributions", liability.RelevantDistributions),
+                    StatutoryValueState.Source, "Cash.vwTaxCorpLiabilityUK", liability.Versions));
             var adjustedProfit = profitBridge.AccountingProfitBeforeTax + addBacks.Sum(value => value.Value.Amount)
                 - deductions.Sum(value => value.Value.Amount)
                 - reviewed.CapitalAllowances.WritingDownAllowance
                 - reviewed.CapitalAllowances.AnnualInvestmentAllowance
                 - reviewed.CapitalAllowances.OtherAllowances;
-            var broughtForwardLoss = computation.PreviousLossesCarriedForward;
-            var currentLoss = computation.LossesCarriedForward - broughtForwardLoss + reviewed.LossesUsed;
-            Require(currentLoss >= 0m && reviewed.LossesUsed <= broughtForwardLoss + currentLoss,
-                "The reviewed loss claim cannot be reconciled to the statement-derived Corporation Tax loss movement.");
+            Require(reviewed.LossesUsed == liability.LossUsed,
+                "The reviewed loss claim does not match the reviewed Corporation Tax liability.");
             var lossRelief = new LossReliefDraft(
-                broughtForwardLoss, currentLoss, reviewed.LossesUsed, computation.LossesCarriedForward);
+                liability.OpeningLoss, liability.LossCreated, liability.LossUsed, liability.ClosingLoss);
             var taxableProfits = Math.Max(0m, adjustedProfit + reviewed.ChargeableGains - reviewed.LossesUsed);
-            var chargeable = Math.Max(0m,
-                decimal.Round(taxableProfits * businessTaxRate, 5, MidpointRounding.AwayFromZero)
-                + computation.BusinessTaxAdjustment);
-            Require(chargeable == Math.Max(0m, computation.StatementTaxDue),
-                "The reviewed Corporation Tax computation does not reconcile to Cash.vwTaxBizStatement.");
+            Require(taxableProfits == liability.TaxableTotalProfits,
+                "The reviewed Corporation Tax adjustments do not reconcile to the reviewed taxable total profits.");
+            Require(liability.AugmentedProfits == liability.TaxableTotalProfits + liability.RelevantDistributions,
+                "The reviewed augmented profits do not reconcile to N plus D.");
+            var chargeable = liability.TaxDue;
             var payable = Math.Max(0m, chargeable - reviewed.OtherReliefs);
+
+            var liabilitySource = new CorporationTaxLiabilitySource(
+                liability.JurisdictionCode,
+                liability.TaxSourceCode,
+                liability.ReportingProfileCode,
+                liability.RelevantDistributions,
+                liability.AugmentedProfits,
+                liability.AssociatedCompanyCount,
+                liability.MainRate,
+                liability.SmallProfitsRate,
+                liability.MarginalReliefFraction,
+                liability.LowerLimit,
+                liability.UpperLimit,
+                liability.AdjustedLowerLimit,
+                liability.AdjustedUpperLimit,
+                liability.TaxBeforeMarginalRelief,
+                liability.MarginalRelief,
+                liability.CorporationTaxChargeable,
+                liability.BusinessTaxAdjustment,
+                liability.TaxDue,
+                liability.CalculationCode,
+                liability.RateFindingCode,
+                liability.ProfileFindingCode,
+                liability.KernelFindingCode,
+                liability.IsAccrualReady,
+                liability.IsFilingReady);
 
             periods.Add(new(period,
                 Source(turnover, accounts.Versions),
@@ -115,8 +149,8 @@ public sealed class TcCorporationTaxSourceReader : ICorporationTaxSource
                 new(lossRelief, StatutoryValueState.Source, "Cash.vwTaxLossesCarriedForward", computation.Versions),
                 Reviewed(reviewed.ChargeableGains),
                 Derived(taxableProfits),
-                Source(businessTaxRate, computation.Versions),
-                Source(chargeable, computation.Versions),
+                new(liabilitySource, StatutoryValueState.Source, "Cash.vwTaxCorpLiabilityUK", liability.Versions),
+                Source(chargeable, liability.Versions),
                 Reviewed(reviewed.OtherReliefs),
                 Derived(payable),
                 Source(Math.Abs(computation.StatementTaxPaid), computation.Versions),

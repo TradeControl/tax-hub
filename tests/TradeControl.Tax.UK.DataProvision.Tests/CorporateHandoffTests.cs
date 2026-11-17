@@ -17,7 +17,11 @@ internal static class CorporateHandoffTests
             accounts, filleted, "ABC001", new(true, true, true), "TIS-6.0", new(2026, 10, 3), false);
         var computation = new CorporationTaxComputation(accounts.Period, 28000m,
             [new("Depreciation", 5000m)], [new("Non-trading income", 1000m)], new(2000m, 0m, 0m),
-            new(0m, 0m, 0m, 0m), 0m, 30000m, 0.19m, 5700m, 0m, 5700m);
+            new(0m, 0m, 0m, 0m), 0m, 30000m,
+            new(0m, 30000m, 0, 0.25m, 0.19m, 0.015m,
+                50000m, 250000m, 50000m, 250000m,
+                5700m, 0m, 5700m, 0m, "SMALL-PROFITS"),
+            5700m, 0m, 5700m);
         var taxReturn = new Ct600Return("Example Limited", "01234567", "1234567890", accounts.Period,
             120000m, 28000m, 30000m, 5700m, 5700m, true, true, null,
             "Jane Director", new(2026, 7, 31));
