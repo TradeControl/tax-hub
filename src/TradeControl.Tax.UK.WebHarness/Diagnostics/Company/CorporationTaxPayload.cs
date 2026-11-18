@@ -25,6 +25,15 @@ public sealed class CorporationTaxPayload
 public sealed class CorporationTaxOfficialTestPayload
 {
     public string TransactionId { get; set; } = string.Empty;
+    public CorporationTaxOfficialTestApprovalPayload Approval { get; set; } = new();
+}
+
+public sealed class CorporationTaxOfficialTestApprovalPayload
+{
+    public string BaselineApprovalReference { get; set; } = string.Empty;
+    public string ApprovedServiceArtifactSha256 { get; set; } = string.Empty;
+    public string AttemptAuthorisationReference { get; set; } = string.Empty;
+    public string AuthorisedTransactionId { get; set; } = string.Empty;
 }
 
 public sealed class CorporationTaxIdentityPayload

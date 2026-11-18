@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.Data.SqlClient;
 using TradeControl.Tax.UK.WebHarness.Diagnostics.Company;
 using Microsoft.AspNetCore.Authorization;
+using System.Security.Claims;
 
 namespace TradeControl.Tax.UK.WebHarness.Controllers;
 
@@ -10,7 +11,8 @@ namespace TradeControl.Tax.UK.WebHarness.Controllers;
 public sealed class CorporationTaxController(
     CorporationTaxPayloadValidator validator,
     CorporationTaxRunner runner,
-    ICorporationTaxOfficialTestPreflight officialTestPreflight) : ControllerBase
+    ICorporationTaxOfficialTestPreflight officialTestPreflight,
+    ICorporationTaxOfficialTestConversation officialTestConversation) : ControllerBase
 {
     [HttpPost]
     [Produces("application/xml", "application/json")]
@@ -126,4 +128,111 @@ public sealed class CorporationTaxController(
             });
         }
     }
+
+    [HttpPost("official-test-stage")]
+    [Authorize(AuthenticationSchemes = WebHarnessAuthenticationOptions.ApplicationScheme)]
+    [Produces("application/json")]
+    public async Task<IActionResult> OfficialTestStage(
+        [FromBody] CorporationTaxPayload payload,
+        CancellationToken cancellationToken)
+    {
+        if (!officialTestConversation.Enabled)
+            return NotFound(new { status = "error", code = "ETS_DISABLED",
+                message = "Corporation Tax ETS staging is available only in Development." });
+        var validation = validator.Validate(payload);
+        if (!validation.IsValid)
+            return BadRequest(new { status = "error", code = "VALIDATION_ERROR",
+                message = "Payload validation failed.", details = validation.Errors });
+        try
+        {
+            return Ok(await officialTestConversation.StageAsync(payload, Principal(), cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { status = "error", code = "ETS_STAGE_REQUEST_ERROR", message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return UnprocessableEntity(new { status = "error", code = "ETS_STAGE_ERROR", message = exception.Message });
+        }
+        catch (SqlException)
+        {
+            return UnprocessableEntity(new { status = "error", code = "SOURCE_CONNECTION_ERROR",
+                message = "The Trade Control source could not be read using the supplied connection." });
+        }
+    }
+
+    [HttpPost("official-test-submit-once")]
+    [Authorize(AuthenticationSchemes = WebHarnessAuthenticationOptions.ApplicationScheme)]
+    [Produces("application/json")]
+    public async Task<IActionResult> OfficialTestSubmitOnce(
+        [FromBody] CorporationTaxOfficialTestExchangeRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!officialTestConversation.ExternalExchangeEnabled)
+            return Conflict(new { status = "error", code = "ETS_EXCHANGE_DISABLED",
+                message = "Corporation Tax ETS exchanges are disabled for this process." });
+        try
+        {
+            return Ok(await officialTestConversation.SubmitOnceAsync(request, Principal(), cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { status = "error", code = "ETS_REQUEST_ERROR", message = exception.Message });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException
+            or KeyNotFoundException or TimeoutException)
+        {
+            return UnprocessableEntity(new { status = "error", code = "ETS_EXCHANGE_ERROR", message = exception.Message });
+        }
+    }
+
+    [HttpPost("official-test-advance-once")]
+    [Authorize(AuthenticationSchemes = WebHarnessAuthenticationOptions.ApplicationScheme)]
+    [Produces("application/json")]
+    public async Task<IActionResult> OfficialTestAdvanceOnce(
+        [FromBody] CorporationTaxOfficialTestAdvanceRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!officialTestConversation.ExternalExchangeEnabled)
+            return Conflict(new { status = "error", code = "ETS_EXCHANGE_DISABLED",
+                message = "Corporation Tax ETS exchanges are disabled for this process." });
+        try
+        {
+            return Ok(await officialTestConversation.AdvanceOnceAsync(request, Principal(), cancellationToken));
+        }
+        catch (ArgumentException exception)
+        {
+            return BadRequest(new { status = "error", code = "ETS_REQUEST_ERROR", message = exception.Message });
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or InvalidDataException
+            or KeyNotFoundException or TimeoutException)
+        {
+            return UnprocessableEntity(new { status = "error", code = "ETS_EXCHANGE_ERROR", message = exception.Message });
+        }
+    }
+
+    [HttpPost("official-test-read")]
+    [Authorize(AuthenticationSchemes = WebHarnessAuthenticationOptions.ApplicationScheme)]
+    [Produces("application/json")]
+    public async Task<IActionResult> OfficialTestRead(
+        [FromBody] CorporationTaxOfficialTestReadRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (!officialTestConversation.Enabled)
+            return NotFound(new { status = "error", code = "ETS_DISABLED",
+                message = "Corporation Tax ETS conversations are available only in Development." });
+        try
+        {
+            return Ok(await officialTestConversation.ReadAsync(request, Principal(), cancellationToken));
+        }
+        catch (Exception exception) when (exception is ArgumentException or KeyNotFoundException)
+        {
+            return BadRequest(new { status = "error", code = "ETS_READ_ERROR", message = exception.Message });
+        }
+    }
+
+    private string Principal() => User.FindFirstValue(ClaimTypes.NameIdentifier)
+        ?? User.Identity?.Name
+        ?? throw new InvalidOperationException("An authenticated application principal is required.");
 }

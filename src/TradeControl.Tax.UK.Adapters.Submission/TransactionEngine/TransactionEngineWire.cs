@@ -99,6 +99,16 @@ internal static partial class TransactionEngineWire
         var root = serviceDocument.DocumentElement;
         if (root?.LocalName != "IRenvelope" || root.NamespaceURI != CorporationTaxNamespace)
             throw new InvalidOperationException("The prepared transmission is not the approved CT600 service root.");
+        var serviceUtrs = serviceDocument.GetElementsByTagName("Key", CorporationTaxNamespace)
+            .OfType<XmlElement>()
+            .Where(element => element.GetAttribute("Type") == "UTR"
+                && element.ParentNode is XmlElement keys && keys.LocalName == "Keys"
+                && keys.ParentNode is XmlElement header && header.LocalName == "IRheader")
+            .ToArray();
+        if (serviceUtrs.Length != 1
+            || !string.Equals(serviceUtrs[0].InnerText.Trim(), identity.Utr, StringComparison.Ordinal))
+            throw new InvalidOperationException(
+                "The prepared CT service root UTR does not match the Transaction Engine identity.");
         var irmarks = serviceDocument.GetElementsByTagName("IRmark", CorporationTaxNamespace)
             .OfType<XmlElement>().ToArray();
         if (irmarks.Length != 1 || irmarks[0].GetAttribute("Type") != "generic"
@@ -159,10 +169,10 @@ internal static partial class TransactionEngineWire
     }
 
     internal static byte[] Poll(string correlationId, TransactionEngineProtocolOptions options) =>
-        ControlMessage("poll", correlationId, options);
+        ControlMessage("poll", "submit", correlationId, options);
 
     internal static byte[] Delete(string correlationId, TransactionEngineProtocolOptions options) =>
-        ControlMessage("delete", correlationId, options);
+        ControlMessage("request", "delete", correlationId, options);
 
     internal static byte[] DataRequest(TransactionEngineSubmissionIdentity identity,
         TransactionEngineProtocolOptions options)
@@ -217,13 +227,13 @@ internal static partial class TransactionEngineWire
         <?xml version="1.0" encoding="utf-8"?><GovTalkMessage xmlns="{GovTalkNamespace}"><EnvelopeVersion>2.0</EnvelopeVersion><Header><MessageDetails><Class>{Escape(options.MessageClass)}</Class><Qualifier>request</Qualifier><Function>submit</Function><TransactionID>{transactionId}</TransactionID><CorrelationID></CorrelationID><Transformation>XML</Transformation>{GatewayTest(identity)}</MessageDetails><SenderDetails>{Authentication(identity)}</SenderDetails></Header><GovTalkDetails><Keys><Key Type="UTR">{Escape(identity.Utr)}</Key></Keys><ChannelRouting><Channel><URI>{Escape(identity.VendorId)}</URI><Product>{Escape(identity.Product)}</Product><Version>{Escape(identity.ProductVersion)}</Version></Channel></ChannelRouting></GovTalkDetails><Body>{serviceRoot}</Body></GovTalkMessage>
         """);
 
-    private static byte[] ControlMessage(string function, string correlationId,
+    private static byte[] ControlMessage(string qualifier, string function, string correlationId,
         TransactionEngineProtocolOptions options)
     {
         ValidateOptions(options);
         ValidateCorrelationId(correlationId);
         return Encode($"""
-            <?xml version="1.0" encoding="utf-8"?><GovTalkMessage xmlns="{GovTalkNamespace}"><EnvelopeVersion>2.0</EnvelopeVersion><Header><MessageDetails><Class>{Escape(options.MessageClass)}</Class><Qualifier>request</Qualifier><Function>{function}</Function><CorrelationID>{correlationId}</CorrelationID><Transformation>XML</Transformation></MessageDetails><SenderDetails></SenderDetails></Header><GovTalkDetails><Keys></Keys></GovTalkDetails><Body></Body></GovTalkMessage>
+            <?xml version="1.0" encoding="utf-8"?><GovTalkMessage xmlns="{GovTalkNamespace}"><EnvelopeVersion>2.0</EnvelopeVersion><Header><MessageDetails><Class>{Escape(options.MessageClass)}</Class><Qualifier>{qualifier}</Qualifier><Function>{function}</Function><CorrelationID>{correlationId}</CorrelationID><Transformation>XML</Transformation></MessageDetails><SenderDetails></SenderDetails></Header><GovTalkDetails><Keys></Keys></GovTalkDetails><Body></Body></GovTalkMessage>
             """);
     }
 

@@ -87,14 +87,19 @@ Assert(Directory.Exists(transactionEngine)
 var transactionEngineHttpConsumers = Directory.GetFiles(transactionEngine, "*.cs", SearchOption.AllDirectories)
     .Where(path => File.ReadAllText(path).Contains("HttpClient", StringComparison.Ordinal))
     .Select(Path.GetFileName).ToArray();
-Assert(transactionEngineHttpConsumers.SequenceEqual(["TransactionEngineHttpGateway.cs"]),
+Assert(transactionEngineHttpConsumers.Order().SequenceEqual(
+        new[] { "CorporationTaxExternalTestConversation.cs", "TransactionEngineHttpGateway.cs" }.Order())
+    && new[] { ".SendAsync(", ".PostAsync(" }.All(term =>
+        !File.ReadAllText(Path.Combine(transactionEngine, "CorporationTaxExternalTestConversation.cs"))
+            .Contains(term, StringComparison.Ordinal)),
     "Transaction Engine HTTP escaped its one-attempt Phase 5.10 transport boundary.");
 var webHarness = Path.Combine(source, "TradeControl.Tax.UK.WebHarness");
-Assert(!SourceContains(webHarness, "TransactionEngineFixtureHandler", "HttpTransactionEngine",
+Assert(!SourceContains(webHarness, "TransactionEngineConversationCoordinator", "TransactionEngineExchangeCoordinator",
+        "HttpTransactionEngine",
         "CorporationTaxOfficialTestSubmission")
     && SourceContains(webHarness, "CorporationTaxOfficialTestPreflight",
-        "CT-ETS-EXTERNAL-SEND-DISABLED"),
-    "The Phase 5.10 WebHarness boundary is not a strictly send-disabled ETS preflight.");
+        "CT-ETS-EXTERNAL-SEND-DISABLED", "OfficialTestExchangeEnabled"),
+    "The CT-C WebHarness boundary bypasses the adapter facade or lacks an explicit exchange gate.");
 var corporationTaxGateway = File.ReadAllText(Path.Combine(Path.GetDirectoryName(application)!,
     "Preparation", "CorporationTaxSubmission.cs"));
 Assert(corporationTaxGateway.Contains(

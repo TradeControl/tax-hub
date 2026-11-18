@@ -201,8 +201,29 @@ builder.Services.AddSingleton<ICorporationTaxOfficialTestPreflight>(sp =>
     return new CorporationTaxOfficialTestPreflight(
         sp.GetRequiredService<CorporationTaxRunner>(),
         new CorporationTaxOfficialTestMaterializer(credentials),
+        new CorporationTaxOfficialTestIdentityBinder(credentials),
         "Trade Control",
         "5.10");
+});
+builder.Services.AddSingleton<ICorporationTaxOfficialTestConversation>(sp =>
+{
+    if (!builder.Environment.IsDevelopment())
+        return new DisabledCorporationTaxOfficialTestConversation();
+    var contentRoot = sp.GetRequiredService<IWebHostEnvironment>().ContentRootPath;
+    var protectedRoot = Path.GetFullPath(Path.Combine(contentRoot,
+        "../../../../.local/hmrc/corporation-tax"));
+    var credentialsRoot = Path.Combine(protectedRoot, "credentials");
+    var credentials = new HmrcCorporationTaxTestCredentialProvider(
+        Path.Combine(credentialsRoot, "email-vendor-id.txt"),
+        Path.Combine(credentialsRoot, "Test service passwords-v1-0.txt"));
+    var conversation = new CorporationTaxExternalTestConversation(credentials,
+        Path.Combine(protectedRoot, "evidence/ets-conversations"),
+        "Trade Control", "5.10", sp.GetRequiredService<TimeProvider>());
+    return new CorporationTaxOfficialTestConversation(
+        sp.GetRequiredService<CorporationTaxRunner>(), conversation,
+        new CorporationTaxOfficialTestIdentityBinder(credentials),
+        builder.Configuration.GetValue<bool>(
+            "TaxHub:CorporationTax:OfficialTestExchangeEnabled"));
 });
 builder.Services.AddHttpClient("CorporationTaxValidation");
 builder.Services.AddSingleton<ICorporationTaxValidationDiagnostics>(sp =>

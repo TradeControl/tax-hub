@@ -62,13 +62,16 @@ internal static class TransactionEngineResponseParser
 
         var details = One(One(root, "Header"), "MessageDetails");
         var messageClass = Required(One(details, "Class"), 64);
-        if (!string.Equals(messageClass, options.MessageClass, StringComparison.Ordinal))
-            throw new InvalidDataException("The response class does not match the submitted document class.");
         var qualifier = Required(One(details, "Qualifier"), 32);
         var function = Required(One(details, "Function"), 32);
         var correlationId = Optional(ZeroOrOne(details, "CorrelationID"), 32);
         var errors = ParseErrors(root);
         var digest = Convert.ToHexString(SHA256.HashData(response));
+        var classMatches = string.Equals(messageClass, options.MessageClass, StringComparison.Ordinal);
+        var undefinedGatewayError = messageClass == "UndefinedClass"
+            && qualifier == "error" && function == "submit" && errors.Length > 0;
+        if (!classMatches && !undefinedGatewayError)
+            throw new InvalidDataException("The response class does not match the submitted document class.");
 
         if (qualifier == "acknowledgement" && function == "submit")
         {
@@ -97,7 +100,8 @@ internal static class TransactionEngineResponseParser
         if (function == "submit" && qualifier == "response")
         {
             ValidateRequiredCorrelation(correlationId);
-            return Result(TransactionEngineResponseKind.BusinessResponse,
+            var (endpoint, pollInterval) = ParseResponseEndpoint(details, options);
+            return Result(TransactionEngineResponseKind.BusinessResponse, endpoint, pollInterval,
                 containsReceipt: root.GetElementsByTagName("IRmarkReceipt").Count > 0);
         }
 
@@ -107,9 +111,10 @@ internal static class TransactionEngineResponseParser
                 throw new InvalidDataException("An error response contains no bounded GovTalk error.");
             var businessError = correlationId is not null && HasBodyContent(root);
             if (businessError) ValidateRequiredCorrelation(correlationId);
-            return Result(businessError
-                ? TransactionEngineResponseKind.BusinessError
-                : TransactionEngineResponseKind.GatewayError);
+            if (!businessError)
+                return Result(TransactionEngineResponseKind.GatewayError);
+            var (endpoint, pollInterval) = ParseResponseEndpoint(details, options);
+            return Result(TransactionEngineResponseKind.BusinessError, endpoint, pollInterval);
         }
 
         throw new InvalidDataException("The GovTalk response does not represent a supported protocol message.");
@@ -139,6 +144,18 @@ internal static class TransactionEngineResponseParser
                 || string.IsNullOrWhiteSpace(error.Type)))
             throw new InvalidDataException("A GovTalk error is missing its required classification.");
         return errors.ToImmutableArray();
+    }
+
+    private static (Uri Endpoint, int PollIntervalSeconds) ParseResponseEndpoint(XmlElement details,
+        TransactionEngineProtocolOptions options)
+    {
+        var responseEndpointElement = One(details, "ResponseEndPoint");
+        var endpoint = TransactionEngineWire.ValidateResponseEndpoint(
+            Required(responseEndpointElement, 2048), options);
+        if (!int.TryParse(responseEndpointElement.GetAttribute("PollInterval"), out var pollInterval)
+            || pollInterval is < 1 or > 86_400)
+            throw new InvalidDataException("The terminal response poll interval is invalid.");
+        return (endpoint, pollInterval);
     }
 
     private static ImmutableArray<TransactionEngineStatusRecord> ParseStatuses(XmlElement root)

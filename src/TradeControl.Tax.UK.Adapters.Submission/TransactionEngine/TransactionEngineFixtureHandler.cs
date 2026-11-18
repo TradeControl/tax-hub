@@ -20,10 +20,10 @@ internal sealed record TransactionEngineOutboundMessage(
     string Sha256);
 
 /// <summary>
-/// Offline coordinator for recording-handler fixtures. It deliberately owns no
-/// network client and is not registered by a host.
+/// Durable Transaction Engine conversation coordinator. It owns no network
+/// client; a separate one-attempt exchange coordinator composes it with HTTP.
 /// </summary>
-internal sealed class TransactionEngineFixtureHandler(
+internal sealed class TransactionEngineConversationCoordinator(
     FileTransactionEngineConversationStore conversations,
     ISubmissionContentStore content,
     TransactionEngineProtocolOptions options,
@@ -128,6 +128,17 @@ internal sealed class TransactionEngineFixtureHandler(
         CancellationToken cancellationToken = default)
     {
         var record = await RequiredConversationAsync(tenant, principal, conversationReference, cancellationToken);
+        if (record.Stage is TransactionEngineConversationStage.TerminalPersisted
+            or TransactionEngineConversationStage.DeletePending)
+        {
+            if (record.TerminalResponseReference is null || record.TerminalResponseSha256 is null)
+                throw new InvalidDataException("The retained terminal response is unavailable.");
+            var terminalBytes = await RequiredContentAsync(tenant, principal,
+                record.TerminalResponseReference, record.TerminalResponseSha256, cancellationToken);
+            var terminal = TransactionEngineResponseParser.Parse(terminalBytes, options);
+            record = await conversations.RefreshTerminalRoutingAsync(tenant, principal,
+                conversationReference, terminal, record.TerminalResponseReference, cancellationToken);
+        }
         if (record.Stage == TransactionEngineConversationStage.TerminalPersisted)
             record = await conversations.BeginDeleteAsync(tenant, principal, conversationReference,
                 cancellationToken);

@@ -186,6 +186,8 @@ internal sealed class FileTransactionEngineConversationStore
                 if (response.Kind is not (TransactionEngineResponseKind.BusinessResponse
                     or TransactionEngineResponseKind.BusinessError))
                     throw new ArgumentException("A terminal business response or error is required.", nameof(response));
+                if (response.ResponseEndpoint is null || response.PollIntervalSeconds is null)
+                    throw new ArgumentException("Terminal routing information is required.", nameof(response));
                 ValidateReference(terminalResponseReference, nameof(terminalResponseReference));
                 if (response.ContainsIrmarkReceipt && string.IsNullOrWhiteSpace(receiptReference))
                     throw new InvalidOperationException("The signed IRmark receipt must be retained before deletion.");
@@ -195,10 +197,36 @@ internal sealed class FileTransactionEngineConversationStore
                     Stage = TransactionEngineConversationStage.TerminalPersisted,
                     TerminalResponseReference = terminalResponseReference,
                     TerminalResponseSha256 = response.ResponseSha256,
+                    ResponseEndpoint = response.ResponseEndpoint.AbsoluteUri,
+                    PollIntervalSeconds = response.PollIntervalSeconds,
                     ReceiptReference = receiptReference,
                     Outcome = response.Kind.ToString()
                 };
             }, cancellationToken);
+
+    internal Task<TransactionEngineConversationRecord> RefreshTerminalRoutingAsync(
+        string tenant, string principal, string reference, TransactionEngineParsedResponse response,
+        string terminalResponseReference, CancellationToken cancellationToken = default) =>
+        MutateOwnedAsync(tenant, principal, reference, current =>
+        {
+            if (current.Stage is not (TransactionEngineConversationStage.TerminalPersisted
+                or TransactionEngineConversationStage.DeletePending))
+                throw new InvalidOperationException("Terminal routing cannot be refreshed at this stage.");
+            EnsureSameCorrelation(current, response);
+            if (response.Kind is not (TransactionEngineResponseKind.BusinessResponse
+                or TransactionEngineResponseKind.BusinessError)
+                || response.ResponseEndpoint is null || response.PollIntervalSeconds is null)
+                throw new ArgumentException("A terminal response with routing information is required.",
+                    nameof(response));
+            if (current.TerminalResponseReference != terminalResponseReference
+                || current.TerminalResponseSha256 != response.ResponseSha256)
+                throw new InvalidDataException("Terminal routing does not originate from the retained response.");
+            return current with
+            {
+                ResponseEndpoint = response.ResponseEndpoint.AbsoluteUri,
+                PollIntervalSeconds = response.PollIntervalSeconds
+            };
+        }, cancellationToken);
 
     internal Task<TransactionEngineConversationRecord> BeginDeleteAsync(string tenant, string principal,
         string reference, CancellationToken cancellationToken = default) => TransitionAsync(

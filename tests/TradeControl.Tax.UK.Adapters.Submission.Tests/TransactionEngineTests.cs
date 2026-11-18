@@ -28,6 +28,7 @@ internal static class TransactionEngineTests
             catch (ArgumentException) { return; }
             catch (InvalidDataException) { return; }
             catch (InvalidOperationException) { return; }
+            catch (KeyNotFoundException) { return; }
             throw new InvalidOperationException(message);
         }
 
@@ -61,6 +62,9 @@ internal static class TransactionEngineTests
         Assert(!Encoding.UTF8.GetString(original).Contains(materialized.Irmark, StringComparison.Ordinal)
             && package.Transmission.Status == PreparedArtifactStatus.Preview,
             "Fixture materialisation mutated or promoted the Objective 3 preview artifact.");
+        await RejectAsync(() => Task.Run(() => TransactionEngineWire.Materialize(
+                package, identity with { Utr = "9999999999" }, TransactionId, options)),
+            "A Transaction Engine envelope was permitted to disagree with the CT IRheader UTR.");
 
         var credentialRoot = Path.Combine(root, "transaction-engine-credentials");
         Directory.CreateDirectory(credentialRoot);
@@ -106,6 +110,65 @@ internal static class TransactionEngineTests
             && exchange.Content.AsSpan().SequenceEqual(responseBytes)
             && exchange.ResponseSha256 == Convert.ToHexString(SHA256.HashData(responseBytes)),
             "The bounded one-attempt ETS HTTP boundary changed the wire request or response evidence.");
+
+        var connectedRoot = Path.Combine(root, "transaction-engine-connected");
+        var connectedStore = new FileTransactionEngineConversationStore(new(
+            Path.Combine(connectedRoot, "conversations.json")));
+        var connectedContent = new FileSubmissionContentStore(new(
+            Path.Combine(connectedRoot, "evidence"), MaximumPayloadBytes: 1024 * 1024,
+            MaximumResponseBytes: 1024 * 1024));
+        var connectedProtocol = new TransactionEngineConversationCoordinator(
+            connectedStore, connectedContent, externalOptions);
+        var connected = await connectedProtocol.PrepareAsync(package, identity, TransactionId,
+            "tenant-connected", "principal-connected", "ct:connected:2026-06-30");
+        var connectedRecording = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(responseBytes)
+        });
+        var connectedExchange = new TransactionEngineExchangeCoordinator(connectedProtocol,
+            new TransactionEngineHttpGateway(new HttpClient(connectedRecording), externalOptions, new()));
+        var acknowledged = await connectedExchange.SubmitOnceAsync(
+            "tenant-connected", "principal-connected", connected.ConversationReference);
+        Assert(connectedRecording.CallCount == 1
+            && acknowledged.Stage == TransactionEngineConversationStage.AwaitingPoll
+            && acknowledged.CorrelationId == Correlation
+            && acknowledged.ResponseEvidence?.Single().Sha256
+                == Convert.ToHexString(SHA256.HashData(responseBytes)),
+            "The durable coordinator was not connected to exactly one HTTP exchange and retained response.");
+        await RejectAsync(() => connectedExchange.SubmitOnceAsync(
+                "tenant-connected", "principal-connected", connected.ConversationReference),
+            "The connected coordinator could issue a duplicate submission after acknowledgement.");
+
+        var facadeRecording = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(responseBytes)
+        });
+        using var externalConversation = new CorporationTaxExternalTestConversation(
+            protectedCredentials, Path.Combine(root, "transaction-engine-facade"),
+            "Trade Control", "5.10", new HttpClient(facadeRecording));
+        var staged = await externalConversation.StageAsync(package, TransactionId,
+            "tenant-facade", "principal-facade", "ct:facade:2026-06-30");
+        Assert(staged.Stage == "Prepared" && staged.ProductionEnabled == false
+            && staged.ServiceArtifactSha256 == package.Transmission.Sha256
+            && facadeRecording.CallCount == 0,
+            "CT-C staging changed the package, enabled production or made a network request.");
+        await RejectAsync(() => externalConversation.SubmitOnceAsync(
+                "tenant-facade", "principal-facade", staged.ConversationReference,
+                TransactionId, staged.ServiceArtifactSha256, new string('A', 64), "CT-C-ATTEMPT-1"),
+            "The CT-C facade accepted named authorisation for a different wire artifact.");
+        Assert(facadeRecording.CallCount == 0,
+            "A mismatched CT-C authorisation reached the HTTP boundary.");
+        var facadeAcknowledged = await externalConversation.SubmitOnceAsync(
+            "tenant-facade", "principal-facade", staged.ConversationReference,
+            TransactionId, staged.ServiceArtifactSha256, staged.WireSha256, "CT-C-ATTEMPT-1");
+        Assert(facadeRecording.CallCount == 1 && facadeAcknowledged.Stage == "AwaitingPoll"
+            && facadeAcknowledged.ResponseSha256.Single()
+                == Convert.ToHexString(SHA256.HashData(responseBytes)),
+            "The CT-C facade did not perform exactly one authorised durable external-test exchange.");
+        await RejectAsync(() => externalConversation.ReadAsync(
+                "tenant-facade", "another-principal", staged.ConversationReference),
+            "A different principal could read the protected CT-C conversation.");
+
         var redirecting = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.Redirect)
         {
             Headers = { Location = new Uri("https://evil.example/") }
@@ -139,20 +202,28 @@ internal static class TransactionEngineTests
 
         var gatewayError = TransactionEngineResponseParser.Parse(Message("error", "submit", null, string.Empty,
             "<GovTalkErrors><Error><RaisedBy>Gateway</RaisedBy><Number>1046</Number><Type>fatal</Type><Text>Authentication failed</Text></Error></GovTalkErrors>"), options);
+        var undefinedClassErrorBytes = Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(
+            Message("error", "submit", null, string.Empty,
+                "<GovTalkErrors><Error><RaisedBy>System</RaisedBy><Number>1001</Number><Type>fatal</Type><Text>Protocol validation failed</Text></Error></GovTalkErrors>"))
+            .Replace($"<Class>{options.MessageClass}</Class>", "<Class>UndefinedClass</Class>",
+                StringComparison.Ordinal));
+        var undefinedClassError = TransactionEngineResponseParser.Parse(undefinedClassErrorBytes, options);
         var businessError = TransactionEngineResponseParser.Parse(Message("error", "submit", Correlation,
-            string.Empty,
+            TerminalDetails,
             "<GovTalkErrors><Error><RaisedBy>department</RaisedBy><Number>3001</Number><Type>business</Type></Error></GovTalkErrors>",
             "<ErrorResponse xmlns=\"http://www.govtalk.gov.uk/CM/errorresponse\"><Error><RaisedBy>ChRIS</RaisedBy><Number>2022</Number><Type>business</Type><Text>IRmark not found.</Text></Error></ErrorResponse>"), options);
         Assert(gatewayError.Kind == TransactionEngineResponseKind.GatewayError
+            && undefinedClassError.Kind == TransactionEngineResponseKind.GatewayError
             && businessError.Kind == TransactionEngineResponseKind.BusinessError
             && businessError.Errors.Any(error => error.Number == "2022"),
             "Gateway failures and departmental business errors were not distinguished.");
 
         var success = TransactionEngineResponseParser.Parse(Message("response", "submit", Correlation,
-            string.Empty, string.Empty,
+            TerminalDetails, string.Empty,
             "<SuccessResponse xmlns=\"http://www.inlandrevenue.gov.uk/SuccessResponse\"><IRmarkReceipt><Signature xmlns=\"http://www.w3.org/2000/09/xmldsig#\" /></IRmarkReceipt></SuccessResponse>"), options);
         Assert(success.Kind == TransactionEngineResponseKind.BusinessResponse
-            && success.ContainsIrmarkReceipt && success.ResponseSha256.Length == 64,
+            && success.ContainsIrmarkReceipt && success.ResponseSha256.Length == 64
+            && success.ResponseEndpoint == options.SubmissionEndpoint,
             "A terminal response did not retain its receipt marker and exact response digest.");
 
         var dataRequest = XDocument.Parse(Encoding.UTF8.GetString(TransactionEngineWire.DataRequest(
@@ -174,7 +245,7 @@ internal static class TransactionEngineTests
         var contentStore = new FileSubmissionContentStore(new(
             Path.Combine(root, "transaction-engine", "evidence"), MaximumPayloadBytes: 1024 * 1024,
             MaximumResponseBytes: 1024 * 1024));
-        var handler = new TransactionEngineFixtureHandler(store, contentStore, options, clock);
+        var handler = new TransactionEngineConversationCoordinator(store, contentStore, options, clock);
         var created = await handler.PrepareAsync(package, identity, TransactionId,
             "tenant-a", "principal-a", "ct:1234567890:2026-06-30");
         var outboundSubmission = await handler.BeginSubmissionAsync(
@@ -196,7 +267,7 @@ internal static class TransactionEngineTests
             "The fixture handler did not expose DATA_REQUEST after an uncertain send.");
 
         var restarted = new FileTransactionEngineConversationStore(new(metadata), clock);
-        var restartedHandler = new TransactionEngineFixtureHandler(restarted, contentStore, options, clock);
+        var restartedHandler = new TransactionEngineConversationCoordinator(restarted, contentStore, options, clock);
         var recovered = await restarted.GetAsync("tenant-a", "principal-a", created.ConversationReference);
         Assert(recovered?.RequiresDataRequest == true && recovered.WireSha256 == materialized.WireSha256,
             "Restart recovery lost the uncertain state or immutable wire digest.");
@@ -222,7 +293,7 @@ internal static class TransactionEngineTests
             "response/wrong.bin", "response/wrong.bin"),
             "A terminal response crossed the correlation boundary.");
 
-        var exactResponse = Message("response", "submit", Correlation, string.Empty, string.Empty,
+        var exactResponse = Message("response", "submit", Correlation, TerminalDetails, string.Empty,
             "<SuccessResponse xmlns=\"http://www.inlandrevenue.gov.uk/SuccessResponse\"><IRmarkReceipt><Signature xmlns=\"http://www.w3.org/2000/09/xmldsig#\" /></IRmarkReceipt></SuccessResponse>");
         var responseReference = await contentStore.StoreAsync("tenant-a", "principal-a",
             SubmissionContentKind.Response, exactResponse);
@@ -236,10 +307,13 @@ internal static class TransactionEngineTests
             && terminal.TerminalResponseSha256 == Convert.ToHexString(SHA256.HashData(exactResponse)),
             "The exact terminal response/receipt was not retained before delete.");
 
-        var deleting = await restarted.BeginDeleteAsync("tenant-a", "principal-a", created.ConversationReference);
-        Assert(deleting.Stage == TransactionEngineConversationStage.DeletePending
+        var outboundDelete = await restartedHandler.BeginOrResumeDeleteAsync(
+            "tenant-a", "principal-a", created.ConversationReference);
+        var deleting = await restarted.GetAsync("tenant-a", "principal-a", created.ConversationReference);
+        Assert(deleting is not null && deleting.Stage == TransactionEngineConversationStage.DeletePending
+            && outboundDelete.Endpoint == options.SubmissionEndpoint
             && deleting.Outcome == nameof(TransactionEngineResponseKind.BusinessResponse),
-            "Beginning deletion changed or discarded the terminal business outcome.");
+            "Beginning deletion did not recover official routing or preserve the terminal outcome.");
         var afterDeleteFailure = await new FileTransactionEngineConversationStore(new(metadata), clock)
             .GetAsync("tenant-a", "principal-a", created.ConversationReference);
         Assert(afterDeleteFailure?.Stage == TransactionEngineConversationStage.DeletePending,
@@ -254,7 +328,9 @@ internal static class TransactionEngineTests
 
         var poll = XDocument.Parse(Encoding.UTF8.GetString(TransactionEngineWire.Poll(Correlation, options)));
         var delete = XDocument.Parse(Encoding.UTF8.GetString(TransactionEngineWire.Delete(Correlation, options)));
-        Assert(poll.Descendants(gov + "Function").Single().Value == "poll"
+        Assert(poll.Descendants(gov + "Qualifier").Single().Value == "poll"
+            && poll.Descendants(gov + "Function").Single().Value == "submit"
+            && delete.Descendants(gov + "Qualifier").Single().Value == "request"
             && delete.Descendants(gov + "Function").Single().Value == "delete"
             && poll.Descendants(gov + "CorrelationID").Single().Value == Correlation,
             "Poll/delete control messages do not preserve the conversation class and correlation ID.");
@@ -284,6 +360,9 @@ internal static class TransactionEngineTests
         string extraDetails = "", string govTalkDetails = "", string body = "") => Encoding.UTF8.GetBytes($"""
         <?xml version="1.0" encoding="utf-8"?><GovTalkMessage xmlns="http://www.govtalk.gov.uk/CM/envelope"><EnvelopeVersion>2.0</EnvelopeVersion><Header><MessageDetails><Class>HMRC-CT-CT600</Class><Qualifier>{qualifier}</Qualifier><Function>{function}</Function>{(correlation is null ? "" : $"<CorrelationID>{correlation}</CorrelationID>")}{extraDetails}</MessageDetails><SenderDetails /></Header><GovTalkDetails><Keys />{govTalkDetails}</GovTalkDetails><Body>{body}</Body></GovTalkMessage>
         """);
+
+    private const string TerminalDetails =
+        "<ResponseEndPoint PollInterval=\"10\">https://transaction-engine.tax.service.gov.uk/submission</ResponseEndPoint>";
 
     // Exact published bytes (SHA-256 E6A38D07BDD1F400A34E8BFD95A69B1718F4F10A3B01BA04602788287CA353E9).
     // Base64 avoids newline conversion because whitespace is material to C14N.

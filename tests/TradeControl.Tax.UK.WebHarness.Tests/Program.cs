@@ -73,6 +73,44 @@ Assert(new CorporationTaxPayloadValidator().Validate(corporationTaxOverridePaylo
         .ContainsKey("accounts.balanceSheetAllocations"),
     "The diagnostic Corporation Tax boundary accepted a non-zero accounts balance-sheet override.");
 
+const string approvedCtArtifact = "349AC5E075E26E7416433433913DF356F449A4C242D6F2C81D72A5CC78044308";
+var ctOfficialTest = new CorporationTaxOfficialTestPayload { TransactionId = "ABCDEF0123456789" };
+var missingCtApproval = CorporationTaxOfficialTestEligibility.Evaluate(
+    ctOfficialTest, approvedCtArtifact, protectedConfigurationAvailable: true);
+Assert(!missingCtApproval.EligibilitySatisfied
+    && missingCtApproval.BlockingReasons.Contains("CT-ETS-BASELINE-APPROVAL-MISSING")
+    && missingCtApproval.BlockingReasons.Contains("CT-ETS-EXACT-ARTIFACT-APPROVAL-MISSING-OR-MISMATCHED")
+    && missingCtApproval.BlockingReasons.Contains("CT-ETS-NAMED-ATTEMPT-AUTHORISATION-MISSING-OR-MISMATCHED")
+    && !missingCtApproval.BlockingReasons.Contains("CT-RECOGNITION-EVIDENCE-PENDING"),
+    "The CT-B preflight did not replace the obsolete recognition blocker with explicit approvals.");
+ctOfficialTest.Approval = new()
+{
+    BaselineApprovalReference = "CT-A-MR6-ACCEPTED-20261117",
+    ApprovedServiceArtifactSha256 = approvedCtArtifact,
+    AttemptAuthorisationReference = "CT-C-NAMED-ATTEMPT-REQUIRED",
+    AuthorisedTransactionId = ctOfficialTest.TransactionId
+};
+var eligibleCtApproval = CorporationTaxOfficialTestEligibility.Evaluate(
+    ctOfficialTest, approvedCtArtifact, protectedConfigurationAvailable: true);
+Assert(eligibleCtApproval.EligibilitySatisfied
+    && eligibleCtApproval.BaselineApprovalDeclared
+    && eligibleCtApproval.ExactArtifactApproved
+    && eligibleCtApproval.NamedAttemptAuthorised
+    && eligibleCtApproval.BlockingReasons.SequenceEqual(
+        ["CT-ETS-EXTERNAL-SEND-DISABLED", "CT-PRODUCTION-SUBMISSION-GATE-CLOSED"]),
+    "The CT-B preflight did not bind baseline, exact artifact and named transaction approvals.");
+var unconfiguredCtApproval = CorporationTaxOfficialTestEligibility.Evaluate(
+    ctOfficialTest, approvedCtArtifact, protectedConfigurationAvailable: false);
+Assert(!unconfiguredCtApproval.EligibilitySatisfied
+    && unconfiguredCtApproval.BlockingReasons.Contains("CT-ETS-PROTECTED-CONFIGURATION-UNAVAILABLE"),
+    "The CT-B preflight accepted an attempt without protected ETS configuration.");
+ctOfficialTest.Approval.ApprovedServiceArtifactSha256 = new string('A', 64);
+ctOfficialTest.Approval.AuthorisedTransactionId = "FFFFFFFFFFFFFFFF";
+var mismatchedCtApproval = CorporationTaxOfficialTestEligibility.Evaluate(
+    ctOfficialTest, approvedCtArtifact, protectedConfigurationAvailable: true);
+Assert(!mismatchedCtApproval.ExactArtifactApproved && !mismatchedCtApproval.NamedAttemptAuthorised,
+    "The CT-B preflight accepted an approval for a different artifact or transaction ID.");
+
 var time = new MutableTimeProvider(new DateTimeOffset(2026, 9, 21, 12, 0, 0, TimeSpan.Zero));
 var store = new PreparedApiRequestStore(new(2, TimeSpan.FromMinutes(5)), time);
 var originalFirst = Request("first");
@@ -173,6 +211,27 @@ Assert(ctPreflightAction.GetCustomAttribute<HttpPostAttribute>()?.Template == "o
     && typeof(ICorporationTaxOfficialTestPreflight).GetMethods().All(method =>
         !method.Name.Contains("Submit", StringComparison.OrdinalIgnoreCase)),
     "The CT ETS diagnostic is not an authenticated, send-disabled preflight boundary.");
+var ctConversationActions = typeof(CorporationTaxController)
+    .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+    .Where(method => method.Name is nameof(CorporationTaxController.OfficialTestStage)
+        or nameof(CorporationTaxController.OfficialTestSubmitOnce)
+        or nameof(CorporationTaxController.OfficialTestAdvanceOnce)
+        or nameof(CorporationTaxController.OfficialTestRead))
+    .ToDictionary(method => method.Name);
+Assert(ctConversationActions.Count == 4
+    && ctConversationActions[nameof(CorporationTaxController.OfficialTestStage)]
+        .GetCustomAttribute<HttpPostAttribute>()?.Template == "official-test-stage"
+    && ctConversationActions[nameof(CorporationTaxController.OfficialTestSubmitOnce)]
+        .GetCustomAttribute<HttpPostAttribute>()?.Template == "official-test-submit-once"
+    && ctConversationActions[nameof(CorporationTaxController.OfficialTestAdvanceOnce)]
+        .GetCustomAttribute<HttpPostAttribute>()?.Template == "official-test-advance-once"
+    && ctConversationActions[nameof(CorporationTaxController.OfficialTestRead)]
+        .GetCustomAttribute<HttpPostAttribute>()?.Template == "official-test-read"
+    && ctConversationActions.Values.All(method =>
+        method.GetCustomAttribute<AuthorizeAttribute>()?.AuthenticationSchemes
+            == WebHarnessAuthenticationOptions.ApplicationScheme)
+    && !new DisabledCorporationTaxOfficialTestConversation().ExternalExchangeEnabled,
+    "The CT-C conversation operations are not authenticated or fail-closed by default.");
 var validateAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.Validate));
 var captureAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.CaptureBrowserSession));
 var signOutAction = diagnosticActions.Single(method => method.Name == nameof(HmrcSandboxDiagnosticsController.EndSession));
