@@ -191,6 +191,19 @@ public sealed class IxbrlDocumentBuilder
             new XElement(Xhtml + "p", Tagged("Section477")),
             new XElement(Xhtml + "p", Tagged("MembersNoAudit")),
             new XElement(Xhtml + "p", Tagged("DirectorsResponsibilities"))));
+        if (report.Taxonomy.Concepts.TryGetValue("RevisedReport", out var revisedReportConcept)
+            && facts.Any(fact => fact.Concept == revisedReportConcept.Name))
+        {
+            content.Add(new XElement(Xhtml + "div", new XAttribute("class", "statements revised-accounts"),
+                new XElement(Xhtml + "h2", "Revised accounts"),
+                new XElement(Xhtml + "p", Tagged("RevisedReport"), " This report is a revised version of accounts previously filed."),
+                new XElement(Xhtml + "p", Tagged("ReplacesPreviouslyFiledReport")),
+                new XElement(Xhtml + "p", Tagged("NowStatutoryAccounts")),
+                new XElement(Xhtml + "p", Tagged("PreparedAsAtPreviouslyFiledReportDate")),
+                new XElement(Xhtml + "p", Tagged("PreviousReportNonCompliance")),
+                new XElement(Xhtml + "p", Tagged("SignificantAmendments")),
+                new XElement(Xhtml + "p", "Revision approved on ", Tagged("RevisionApprovedOn"))));
+        }
         content.Add(new XElement(Xhtml + "div", new XElement(Xhtml + "h2", "Notes"),
             new XElement(Xhtml + "p", new XElement(Xhtml + "strong", "Principal activity: "), Tagged("PrincipalActivity")),
             new XElement(Xhtml + "p", new XElement(Xhtml + "strong", "Average number of employees: "), Tagged("AverageEmployees"))));

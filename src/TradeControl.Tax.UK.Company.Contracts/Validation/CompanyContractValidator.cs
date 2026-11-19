@@ -49,6 +49,19 @@ public sealed class CompanyContractValidator
         ErrorIf(!accounts.Profile.MembersHaveNotRequiredAudit || !accounts.Profile.DirectorsAcknowledgeResponsibilities,
             "ACC003", "The supported unaudited micro profile requires both statutory statements.", "Profile");
         ErrorIf(accounts.Approval.ApprovedOn < accounts.Period.End, "ACC004", "Approval cannot precede the accounts period end.", "Approval.ApprovedOn");
+        if (accounts.Revision is { } revision)
+        {
+            ErrorIf(string.IsNullOrWhiteSpace(revision.ReplacesPreviouslyFiledReportStatement)
+                    || string.IsNullOrWhiteSpace(revision.NowStatutoryAccountsStatement)
+                    || string.IsNullOrWhiteSpace(revision.PreparedAsAtPreviouslyFiledReportDateStatement)
+                    || string.IsNullOrWhiteSpace(revision.NonComplianceStatement)
+                    || string.IsNullOrWhiteSpace(revision.SignificantAmendmentsStatement),
+                "ACC008", "Revised accounts require every replacement-method statement.", "Revision");
+            ErrorIf(revision.ApprovedOn < accounts.Period.End
+                    || revision.ApprovedOn != accounts.Approval.ApprovedOn,
+                "ACC009", "The revision approval date must be the accounts approval date and cannot precede the period end.",
+                "Revision.ApprovedOn");
+        }
         ErrorIf(accounts.BalanceSheet.CurrentAssets.Current + accounts.BalanceSheet.PrepaymentsAndAccruedIncome.Current - accounts.BalanceSheet.CreditorsDueWithinOneYear.Current != accounts.BalanceSheet.NetCurrentAssetsLiabilities.Current,
             "ACC005", "Net current assets do not reconcile.", "BalanceSheet.NetCurrentAssetsLiabilities");
         ErrorIf(accounts.BalanceSheet.FixedAssets.Current + accounts.BalanceSheet.NetCurrentAssetsLiabilities.Current != accounts.BalanceSheet.TotalAssetsLessCurrentLiabilities.Current,

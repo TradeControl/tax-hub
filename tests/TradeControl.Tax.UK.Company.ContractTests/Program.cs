@@ -34,6 +34,31 @@ Assert(accounts.IncomeStatement.Turnover.Current == 120000m, "Filleting mutated 
 Assert(validator.Validate(fullReport).IsValid, "Full accounts XBRL facts failed validation.");
 Assert(validator.Validate(filletedReport).IsValid, "Filleted accounts XBRL facts failed validation.");
 
+var revisedAccounts = accounts with
+{
+    Revision = new(
+        "These revised accounts replace the accounts previously filed for this period.",
+        "These revised accounts are now the statutory accounts for this period.",
+        "These revised accounts have been prepared as at the date of the previously filed accounts.",
+        "The previously filed accounts did not comply because Corporation Tax on the profit was omitted.",
+        "Corporation Tax on the profit and the resulting retained earnings have been corrected.",
+        accounts.Approval.ApprovedOn)
+};
+Assert(validator.Validate(revisedAccounts).IsValid,
+    "Valid replacement-method revised accounts were rejected.");
+var revisedReport = accountsProjection.Project(revisedAccounts, true,
+    "Example Limited revised accounts");
+Assert(revisedReport.Facts.Count == filletedReport.Facts.Count + 7,
+    "The complete FRC replacement-method revised-accounts fact set was not projected.");
+var revisedIx = new IxbrlDocumentBuilder().Build(revisedReport, "revised-accounts.html");
+var revisedXml = XDocument.Parse(Encoding.UTF8.GetString(revisedIx.Content));
+Assert(revisedXml.Descendants(XName.Get("nonNumeric", "http://www.xbrl.org/2013/inlineXBRL")).Single(x =>
+        x.Attribute("name")?.Value == "bus:ReportAnAmendedRevisedVersionPreviouslyFiledReportTruefalse").Value == "true",
+    "The revised-accounts Boolean marker is absent or false.");
+Assert(revisedXml.Root!.Value.Contains("Corporation Tax on the profit was omitted", StringComparison.Ordinal)
+       && revisedXml.Root.Value.Contains("resulting retained earnings have been corrected", StringComparison.Ordinal),
+    "The human-readable revised-accounts replacement statements are absent.");
+
 var ixBuilder = new IxbrlDocumentBuilder();
 var fullIx = ixBuilder.Build(fullReport, "accounts.html");
 var fullIxAgain = ixBuilder.Build(fullReport, "accounts.html");

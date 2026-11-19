@@ -12,6 +12,14 @@ public sealed record ReportingPeriod(DateOnly Start, DateOnly End)
 
 public sealed record AccountsApproval(DateOnly ApprovedOn, string SigningDirectorName);
 
+public sealed record AccountsRevision(
+    string ReplacesPreviouslyFiledReportStatement,
+    string NowStatutoryAccountsStatement,
+    string PreparedAsAtPreviouslyFiledReportDateStatement,
+    string NonComplianceStatement,
+    string SignificantAmendmentsStatement,
+    DateOnly ApprovedOn);
+
 public enum ReportingFramework { Frs105 }
 public enum AccountsType { MicroEntity }
 public enum AuditStatus { UnauditedExempt, Audited }
@@ -72,4 +80,5 @@ public sealed record StatutoryAccounts(
     IncomeStatement IncomeStatement,
     AccountsNotes Notes,
     AccountsApproval Approval,
-    string Currency = "GBP");
+    string Currency = "GBP",
+    AccountsRevision? Revision = null);

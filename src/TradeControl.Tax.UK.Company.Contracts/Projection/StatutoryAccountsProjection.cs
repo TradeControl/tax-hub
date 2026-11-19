@@ -66,6 +66,22 @@ public sealed class StatutoryAccountsProjection
             Text("DirectorsResponsibilities", duration, "The directors acknowledge their responsibilities for complying with the requirements of the Act with respect to accounting records and the preparation of accounts.")
         };
 
+        if (accounts.Revision is { } revision)
+        {
+            facts.Add(Boolean("RevisedReport", duration, true));
+            facts.Add(Text("ReplacesPreviouslyFiledReport", duration,
+                revision.ReplacesPreviouslyFiledReportStatement));
+            facts.Add(Text("NowStatutoryAccounts", duration,
+                revision.NowStatutoryAccountsStatement));
+            facts.Add(Text("PreparedAsAtPreviouslyFiledReportDate", duration,
+                revision.PreparedAsAtPreviouslyFiledReportDateStatement));
+            facts.Add(Text("PreviousReportNonCompliance", duration,
+                revision.NonComplianceStatement));
+            facts.Add(Text("SignificantAmendments", duration,
+                revision.SignificantAmendmentsStatement));
+            facts.Add(Date("RevisionApprovedOn", duration, revision.ApprovedOn));
+        }
+
         AddComparatives(accounts.BalanceSheet, comparativeInstant, facts, gbp);
 
         if (!filleted)
