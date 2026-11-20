@@ -33,6 +33,13 @@ public sealed class IxbrlDocumentBuilder
         var factIndexes = orderedFacts.Select((fact, index) => (fact, index: index + 1)).ToDictionary(x => x.fact, x => x.index);
         XElement RenderFact(XbrlFact fact) => FactElement(fact, contextIds[fact.Context],
             fact.Unit is null ? null : unitIds[fact.Unit], factIndexes[fact]);
+        var hiddenFacts = report.Presentation?.Kind == IxbrlPresentationKind.StatutoryAccounts
+                          && report.Taxonomy.Concepts.TryGetValue("RevisedReport", out var revisedReportConcept)
+            ? orderedFacts.Where(fact => fact.Concept == revisedReportConcept.Name).ToArray()
+            : [];
+        var hidden = hiddenFacts.Length == 0
+            ? null
+            : new XElement(Ix + "hidden", hiddenFacts.Select(RenderFact));
         var body = report.Presentation?.Kind == IxbrlPresentationKind.StatutoryAccounts
             ? StatutoryAccountsBody(report, orderedFacts, RenderFact)
             : new XElement(Xhtml + "table", orderedFacts.Select(x =>
@@ -59,7 +66,7 @@ public sealed class IxbrlDocumentBuilder
                     new XElement(Xhtml + "style", new XAttribute("type", "text/css"), "body{font-family:Arial,sans-serif;max-width:900px;margin:2rem auto;color:#222}h1,h2{text-align:center}.identity{text-align:center}.accounts{width:100%;border-collapse:collapse;margin:1.5rem 0}.accounts th,.accounts td{padding:.4rem .6rem;border-bottom:1px solid #ddd}.accounts th:first-child,.accounts td:first-child{text-align:left}.accounts th:not(:first-child),.accounts td:not(:first-child){text-align:right}.total td{font-weight:bold;border-top:1px solid #222}.statements p{margin:.7rem 0}.signature{margin-top:2rem}.filing-information{font-size:.85rem;color:#444}")),
                 new XElement(Xhtml + "body",
                     new XElement(Xhtml + "div", new XAttribute("style", "display:none"),
-                        new XElement(Ix + "header", references, resources)),
+                        new XElement(Ix + "header", hidden, references, resources)),
                     body));
         var document = new XDocument(new XDeclaration("1.0", "utf-8", null), root);
 
@@ -191,12 +198,12 @@ public sealed class IxbrlDocumentBuilder
             new XElement(Xhtml + "p", Tagged("Section477")),
             new XElement(Xhtml + "p", Tagged("MembersNoAudit")),
             new XElement(Xhtml + "p", Tagged("DirectorsResponsibilities"))));
-        if (report.Taxonomy.Concepts.TryGetValue("RevisedReport", out var revisedReportConcept)
-            && facts.Any(fact => fact.Concept == revisedReportConcept.Name))
+        var revisedReport = Find("RevisedReport");
+        if (revisedReport is not null)
         {
             content.Add(new XElement(Xhtml + "div", new XAttribute("class", "statements revised-accounts"),
                 new XElement(Xhtml + "h2", "Revised accounts"),
-                new XElement(Xhtml + "p", Tagged("RevisedReport"), " This report is a revised version of accounts previously filed."),
+                new XElement(Xhtml + "p", "This report is a revised version of accounts previously filed."),
                 new XElement(Xhtml + "p", Tagged("ReplacesPreviouslyFiledReport")),
                 new XElement(Xhtml + "p", Tagged("NowStatutoryAccounts")),
                 new XElement(Xhtml + "p", Tagged("PreparedAsAtPreviouslyFiledReportDate")),

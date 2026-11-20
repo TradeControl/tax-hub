@@ -55,6 +55,20 @@ var revisedXml = XDocument.Parse(Encoding.UTF8.GetString(revisedIx.Content));
 Assert(revisedXml.Descendants(XName.Get("nonNumeric", "http://www.xbrl.org/2013/inlineXBRL")).Single(x =>
         x.Attribute("name")?.Value == "bus:ReportAnAmendedRevisedVersionPreviouslyFiledReportTruefalse").Value == "true",
     "The revised-accounts Boolean marker is absent or false.");
+XNamespace revisedIxNamespace = "http://www.xbrl.org/2013/inlineXBRL";
+XNamespace revisedXhtml = "http://www.w3.org/1999/xhtml";
+var revisedHeader = revisedXml.Descendants(revisedIxNamespace + "header").Single();
+Assert(revisedHeader.Elements().Select(x => x.Name).SequenceEqual(
+        [revisedIxNamespace + "hidden", revisedIxNamespace + "references", revisedIxNamespace + "resources"])
+       && revisedHeader.Element(revisedIxNamespace + "hidden")?.Elements().Single().Attribute("name")?.Value
+       == "bus:ReportAnAmendedRevisedVersionPreviouslyFiledReportTruefalse",
+    "The non-presentational revised-accounts Boolean marker is not retained in ix:hidden.");
+var revisedStatements = revisedXml.Descendants(revisedXhtml + "div")
+    .Single(element => string.Equals(element.Attribute("class")?.Value,
+        "statements revised-accounts", StringComparison.Ordinal));
+Assert(revisedStatements.Elements(revisedXhtml + "p").First().Value
+       == "This report is a revised version of accounts previously filed.",
+    "The human-readable revised-accounts marker leaks its raw Boolean value.");
 Assert(revisedXml.Root!.Value.Contains("Corporation Tax on the profit was omitted", StringComparison.Ordinal)
        && revisedXml.Root.Value.Contains("resulting retained earnings have been corrected", StringComparison.Ordinal),
     "The human-readable revised-accounts replacement statements are absent.");
