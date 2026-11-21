@@ -46,3 +46,8 @@ IF DATABASE_PRINCIPAL_ID(N'TaxHubCompaniesHouseApplication') IS NOT NULL
     GRANT SELECT, INSERT, UPDATE ON OBJECT::Tax.CorporationTaxReview
         TO TaxHubCompaniesHouseApplication;
 GO
+
+IF DATABASE_PRINCIPAL_ID(N'tradecontrol_tax_workflow_runtime') IS NOT NULL
+    GRANT SELECT, INSERT, UPDATE ON OBJECT::Tax.CorporationTaxReview
+        TO tradecontrol_tax_workflow_runtime;
+GO

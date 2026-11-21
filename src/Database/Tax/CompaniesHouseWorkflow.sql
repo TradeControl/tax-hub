@@ -142,3 +142,10 @@ GO
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax TO TaxHubCompaniesHouseApplication;
 GO
+
+-- The multi-tenant hosting initializer owns this role. Grant it the same workflow
+-- boundary when that initializer has already established the reviewed database.
+IF DATABASE_PRINCIPAL_ID(N'tradecontrol_tax_workflow_runtime') IS NOT NULL
+    GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax
+        TO tradecontrol_tax_workflow_runtime;
+GO

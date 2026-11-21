@@ -151,8 +151,29 @@ Assert(companiesHouseDdl.Contains("UX_CompaniesHouseApproval_Preparation", Strin
 Assert(companiesHouseDdl.Contains("CREATE ROLE TaxHubCompaniesHouseApplication", StringComparison.Ordinal)
        && companiesHouseDdl.Contains(
            "GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax TO TaxHubCompaniesHouseApplication",
-           StringComparison.Ordinal),
+            StringComparison.Ordinal)
+       && companiesHouseDdl.Contains("tradecontrol_tax_workflow_runtime", StringComparison.Ordinal),
     "Companies House workflow SQL does not provision its least-privilege application role.");
+var corporationTaxReviewDdl = File.ReadAllText(Path.Combine(source, "Database", "Tax",
+    "CorporationTaxReview.sql"));
+Assert(corporationTaxReviewDdl.Contains("TO TaxHubCompaniesHouseApplication", StringComparison.Ordinal)
+       && corporationTaxReviewDdl.Contains("TO tradecontrol_tax_workflow_runtime", StringComparison.Ordinal),
+    "Corporation Tax review SQL does not support both legacy and multi-tenant runtime roles.");
+var corporationTaxPreparationDdl = File.ReadAllText(Path.Combine(source, "Database", "Tax",
+    "CorporationTaxPreparation.sql"));
+Assert(corporationTaxPreparationDdl.Contains("Tax.CorporationTaxPreparation", StringComparison.Ordinal)
+       && corporationTaxPreparationDdl.Contains("PRIMARY KEY (TenantReference, Reference)",
+           StringComparison.Ordinal)
+       && corporationTaxPreparationDdl.Contains("ReturnDetailsSha256", StringComparison.Ordinal)
+       && corporationTaxPreparationDdl.Contains("TO TaxHubCompaniesHouseApplication",
+           StringComparison.Ordinal)
+       && corporationTaxPreparationDdl.Contains("TO tradecontrol_tax_workflow_runtime",
+           StringComparison.Ordinal)
+       && !corporationTaxPreparationDdl.Contains("UPDATE Tax.CorporationTaxPreparation",
+           StringComparison.OrdinalIgnoreCase)
+       && !corporationTaxPreparationDdl.Contains("DELETE FROM Tax.CorporationTaxPreparation",
+           StringComparison.OrdinalIgnoreCase),
+    "Corporation Tax preparation SQL lost its append-only tenant evidence boundary.");
 Assert(companiesHouseDdl.Contains("ALTER SCHEMA Tax TRANSFER", StringComparison.Ordinal)
        && companiesHouseDdl.Contains("DROP SCHEMA TaxHub", StringComparison.Ordinal),
     "Companies House workflow SQL does not preserve the reviewed TaxHub-to-Tax migration path.");
