@@ -68,6 +68,9 @@ internal interface ITransactionEngineConversationStore
     Task<TransactionEngineConversationRecord?> GetForLogicalSubmissionAsync(
         string tenantReference, string logicalSubmissionReference,
         CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TransactionEngineConversationRecord>> ListForOwnerAsync(
+        string tenantReference, string principalReference, int maximumRecords,
+        CancellationToken cancellationToken = default);
     Task<IReadOnlyList<TransactionEngineConversationRecord>> ListActionableAsync(
         DateTimeOffset now, int maximumRecords,
         CancellationToken cancellationToken = default);
@@ -181,6 +184,24 @@ internal sealed class FileTransactionEngineConversationStore : ITransactionEngin
         return records.SingleOrDefault(record => record.TenantReference == tenantReference
             && record.LogicalSubmissionReference == logicalSubmissionReference);
     }, cancellationToken);
+
+    public Task<IReadOnlyList<TransactionEngineConversationRecord>> ListForOwnerAsync(
+        string tenantReference, string principalReference, int maximumRecords,
+        CancellationToken cancellationToken = default) =>
+        InspectAsync<IReadOnlyList<TransactionEngineConversationRecord>>(records =>
+        {
+            ValidateReference(tenantReference, nameof(tenantReference));
+            ValidateReference(principalReference, nameof(principalReference));
+            if (maximumRecords is < 1 or > 1000)
+                throw new ArgumentOutOfRangeException(nameof(maximumRecords));
+            return records.Where(record => record.TenantReference == tenantReference
+                    && record.PrincipalReference == principalReference)
+                .OrderByDescending(record => record.UpdatedAt)
+                .ThenByDescending(record => record.ConversationReference,
+                    StringComparer.Ordinal)
+                .Take(maximumRecords)
+                .ToArray();
+        }, cancellationToken);
 
     public Task<IReadOnlyList<TransactionEngineConversationRecord>> ListActionableAsync(
         DateTimeOffset now, int maximumRecords,

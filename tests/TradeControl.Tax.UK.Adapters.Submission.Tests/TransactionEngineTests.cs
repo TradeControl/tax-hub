@@ -140,6 +140,14 @@ internal static class TransactionEngineTests
             connectedStore, connectedContent, externalOptions);
         var connected = await connectedProtocol.PrepareAsync(package, identity, TransactionId,
             "tenant-connected", "principal-connected", "ct:connected:2026-06-30");
+        var ownerConversations = await connectedStore.ListForOwnerAsync(
+            "tenant-connected", "principal-connected", 1);
+        var otherOwnerConversations = await connectedStore.ListForOwnerAsync(
+            "tenant-connected", "principal-other", 1);
+        Assert(ownerConversations.Count == 1
+            && ownerConversations[0].ConversationReference == connected.ConversationReference
+            && otherOwnerConversations.Count == 0,
+            "Owner-scoped Transaction Engine status readback crossed its principal boundary.");
         var connectedRecording = new RecordingHandler(new HttpResponseMessage(HttpStatusCode.OK)
         {
             Content = new ByteArrayContent(responseBytes)
