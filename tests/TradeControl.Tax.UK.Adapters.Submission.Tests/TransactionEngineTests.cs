@@ -33,6 +33,14 @@ internal static class TransactionEngineTests
         }
 
         var options = TransactionEngineProtocolOptions.CorporationTaxFixture();
+        var productionOptions = TransactionEngineProtocolOptions.CorporationTaxProduction();
+        Assert(productionOptions.SubmissionEndpoint.AbsoluteUri
+                   == "https://transaction-engine.tax.service.gov.uk/submission"
+               && productionOptions.TrustedResponseHosts.SetEquals(
+                   ["transaction-engine.tax.service.gov.uk"])
+               && !productionOptions.TrustedResponseHosts.Contains(
+                   "test-transaction-engine.tax.service.gov.uk"),
+            "The production Transaction Engine profile is not isolated from ETS.");
         var official = Convert.FromBase64String(OfficialIrmarkSubmissionBase64);
         Assert(Convert.ToHexString(SHA256.HashData(official))
                 == "E6A38D07BDD1F400A34E8BFD95A69B1718F4F10A3B01BA04602788287CA353E9"
@@ -65,6 +73,17 @@ internal static class TransactionEngineTests
         await RejectAsync(() => Task.Run(() => TransactionEngineWire.Materialize(
                 package, identity with { Utr = "9999999999" }, TransactionId, options)),
             "A Transaction Engine envelope was permitted to disagree with the CT IRheader UTR.");
+        await RejectAsync(() => Task.Run(() => TransactionEngineWire.Materialize(
+                package, identity, TransactionId, productionOptions)),
+            "External-test credentials were permitted to materialise a production request.");
+        var liveIdentity = identity with { IsExternalTest = false };
+        var productionWire = TransactionEngineWire.Materialize(package, liveIdentity,
+            TransactionId, productionOptions);
+        Assert(Encoding.UTF8.GetString(productionWire.Content.AsSpan())
+                .Contains("<GatewayTest>0</GatewayTest>", StringComparison.Ordinal)
+            && productionWire.WireSha256
+                == Convert.ToHexString(SHA256.HashData(productionWire.Content.AsSpan())),
+            "The production materialiser did not suppress the external-test flag or preserve evidence.");
 
         var credentialRoot = Path.Combine(root, "transaction-engine-credentials");
         Directory.CreateDirectory(credentialRoot);
@@ -325,6 +344,13 @@ internal static class TransactionEngineTests
         Assert(complete.Stage == TransactionEngineConversationStage.Complete
             && complete.TerminalResponseReference == responseReference,
             "DELETE_RESPONSE did not complete the protocol while retaining terminal evidence.");
+        await RejectAsync(() => restarted.CreateAsync("tenant-a", "principal-a",
+                created.LogicalSubmissionReference, materialized, created.PayloadReference),
+            "A completed approved filing could be staged as a second submission.");
+        Assert((await restarted.GetForLogicalSubmissionAsync("tenant-a",
+                created.LogicalSubmissionReference))?.Stage
+            == TransactionEngineConversationStage.Complete,
+            "Completed submission evidence disappeared from its logical filing identity.");
 
         var poll = XDocument.Parse(Encoding.UTF8.GetString(TransactionEngineWire.Poll(Correlation, options)));
         var delete = XDocument.Parse(Encoding.UTF8.GetString(TransactionEngineWire.Delete(Correlation, options)));

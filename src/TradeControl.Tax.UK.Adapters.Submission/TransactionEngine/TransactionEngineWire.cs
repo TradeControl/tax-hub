@@ -14,7 +14,8 @@ internal sealed record TransactionEngineProtocolOptions(
     Uri SubmissionEndpoint,
     IReadOnlySet<string> TrustedResponseHosts,
     int MaximumXmlBytes = 8 * 1024 * 1024,
-    int RecoveryPollIntervalSeconds = 10)
+    int RecoveryPollIntervalSeconds = 10,
+    bool? ExternalTestRequired = null)
 {
     internal const string CorporationTaxClass = "HMRC-CT-CT600";
     internal static readonly Uri PublishedProductionEndpoint =
@@ -37,7 +38,15 @@ internal sealed record TransactionEngineProtocolOptions(
         new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
             PublishedExternalTestEndpoint.Host
-        });
+        }, ExternalTestRequired: true);
+
+    internal static TransactionEngineProtocolOptions CorporationTaxProduction() => new(
+        CorporationTaxClass,
+        PublishedProductionEndpoint,
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            PublishedProductionEndpoint.Host
+        }, ExternalTestRequired: false);
 }
 
 internal sealed record TransactionEngineSubmissionIdentity(
@@ -83,6 +92,12 @@ internal static partial class TransactionEngineWire
         ValidateOptions(options);
         ValidateIdentity(identity);
         ValidateTransactionId(transactionId);
+        if (options.ExternalTestRequired == false && identity.IsExternalTest)
+            throw new InvalidOperationException(
+                "External-test credentials cannot materialise a production Transaction Engine request.");
+        if (options.ExternalTestRequired == true && !identity.IsExternalTest)
+            throw new InvalidOperationException(
+                "Live credentials cannot materialise an External Test Service request.");
 
         if (package.ServiceCode != "HMRC-CORPORATION-TAX"
             || package.Polling.Mode != SubmissionPollingMode.TransactionEngine)

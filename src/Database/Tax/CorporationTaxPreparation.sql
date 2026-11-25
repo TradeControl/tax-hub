@@ -27,16 +27,25 @@ BEGIN
 END;
 GO
 
+IF DATABASE_PRINCIPAL_ID(N'TaxHubCorporationTaxApplication') IS NULL
+    CREATE ROLE TaxHubCorporationTaxApplication AUTHORIZATION dbo;
+GO
+
 IF DATABASE_PRINCIPAL_ID(N'TaxHubCompaniesHouseApplication') IS NOT NULL
+    REVOKE SELECT, INSERT ON OBJECT::Tax.CorporationTaxPreparation
+        FROM TaxHubCompaniesHouseApplication;
+GO
+
+IF DATABASE_PRINCIPAL_ID(N'TaxHubCorporationTaxApplication') IS NOT NULL
 BEGIN
-    GRANT SELECT, INSERT ON Tax.CorporationTaxPreparation
-        TO TaxHubCompaniesHouseApplication;
+    GRANT SELECT, INSERT ON OBJECT::Tax.CorporationTaxPreparation
+        TO TaxHubCorporationTaxApplication;
 END;
 GO
 
 IF DATABASE_PRINCIPAL_ID(N'tradecontrol_tax_workflow_runtime') IS NOT NULL
 BEGIN
-    GRANT SELECT, INSERT ON Tax.CorporationTaxPreparation
+    GRANT SELECT, INSERT ON OBJECT::Tax.CorporationTaxPreparation
         TO tradecontrol_tax_workflow_runtime;
 END;
 GO

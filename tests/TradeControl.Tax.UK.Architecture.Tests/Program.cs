@@ -106,6 +106,15 @@ Assert(corporationTaxGateway.Contains(
         "No Corporation Tax service artifact is approved for authority dispatch.",
         StringComparison.Ordinal),
     "Phase 5.9 relaxed the fail-closed Corporation Tax submission gate.");
+var businessTaxReader = File.ReadAllText(Path.Combine(source,
+    "TradeControl.Tax.UK.Adapters.TradeControl", "Readers", "TcBusinessTaxReader.cs"));
+Assert(!businessTaxReader.Contains(
+           "var rowVersion = Convert.ToHexString((byte[])reader[\"SnapshotRowVer\"]);",
+           StringComparison.Ordinal)
+       && businessTaxReader.Contains(
+           "Versions = [new(\"Cash.fnTaxBizComputation\", projectionToken, null)]",
+           StringComparison.Ordinal),
+    "Corporation Tax computation currentness still depends on database-wide @@DBTS evidence.");
 
 var simulator = projects.Single(path => Path.GetFileName(path) == "TradeControl.Tax.UK.Tools.CompaniesHouseSimulator.csproj");
 Assert(ProjectReferences(simulator).Count == 1
@@ -150,30 +159,90 @@ Assert(companiesHouseDdl.Contains("UX_CompaniesHouseApproval_Preparation", Strin
     "Companies House workflow SQL permits competing approvals for one exact preparation.");
 Assert(companiesHouseDdl.Contains("CREATE ROLE TaxHubCompaniesHouseApplication", StringComparison.Ordinal)
        && companiesHouseDdl.Contains(
-           "GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax TO TaxHubCompaniesHouseApplication",
+           "REVOKE SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax",
             StringComparison.Ordinal)
+       && companiesHouseDdl.Contains(
+           "GRANT SELECT, INSERT ON OBJECT::Tax.CompaniesHousePreparation",
+           StringComparison.Ordinal)
+       && companiesHouseDdl.Contains(
+           "GRANT SELECT, INSERT, UPDATE ON OBJECT::Tax.CompaniesHouseConversation",
+           StringComparison.Ordinal)
+       && !companiesHouseDdl.Contains(
+           "GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax",
+           StringComparison.Ordinal)
        && companiesHouseDdl.Contains("tradecontrol_tax_workflow_runtime", StringComparison.Ordinal),
-    "Companies House workflow SQL does not provision its least-privilege application role.");
+    "Companies House workflow SQL does not preserve its object-scoped application role.");
 var corporationTaxReviewDdl = File.ReadAllText(Path.Combine(source, "Database", "Tax",
     "CorporationTaxReview.sql"));
-Assert(corporationTaxReviewDdl.Contains("TO TaxHubCompaniesHouseApplication", StringComparison.Ordinal)
+Assert(corporationTaxReviewDdl.Contains("CREATE ROLE TaxHubCorporationTaxApplication",
+           StringComparison.Ordinal)
+       && corporationTaxReviewDdl.Contains(
+           "REVOKE SELECT, INSERT, UPDATE ON OBJECT::Tax.CorporationTaxReview",
+           StringComparison.Ordinal)
+       && corporationTaxReviewDdl.Contains("TO TaxHubCorporationTaxApplication", StringComparison.Ordinal)
        && corporationTaxReviewDdl.Contains("TO tradecontrol_tax_workflow_runtime", StringComparison.Ordinal),
-    "Corporation Tax review SQL does not support both legacy and multi-tenant runtime roles.");
+    "Corporation Tax review SQL does not support its product and hosted runtime roles.");
 var corporationTaxPreparationDdl = File.ReadAllText(Path.Combine(source, "Database", "Tax",
     "CorporationTaxPreparation.sql"));
 Assert(corporationTaxPreparationDdl.Contains("Tax.CorporationTaxPreparation", StringComparison.Ordinal)
        && corporationTaxPreparationDdl.Contains("PRIMARY KEY (TenantReference, Reference)",
            StringComparison.Ordinal)
        && corporationTaxPreparationDdl.Contains("ReturnDetailsSha256", StringComparison.Ordinal)
-       && corporationTaxPreparationDdl.Contains("TO TaxHubCompaniesHouseApplication",
+       && corporationTaxPreparationDdl.Contains("CREATE ROLE TaxHubCorporationTaxApplication",
+           StringComparison.Ordinal)
+       && corporationTaxPreparationDdl.Contains("TO TaxHubCorporationTaxApplication",
            StringComparison.Ordinal)
        && corporationTaxPreparationDdl.Contains("TO tradecontrol_tax_workflow_runtime",
+           StringComparison.Ordinal)
+       && corporationTaxPreparationDdl.Contains(
+           "REVOKE SELECT, INSERT ON OBJECT::Tax.CorporationTaxPreparation",
            StringComparison.Ordinal)
        && !corporationTaxPreparationDdl.Contains("UPDATE Tax.CorporationTaxPreparation",
            StringComparison.OrdinalIgnoreCase)
        && !corporationTaxPreparationDdl.Contains("DELETE FROM Tax.CorporationTaxPreparation",
            StringComparison.OrdinalIgnoreCase),
     "Corporation Tax preparation SQL lost its append-only tenant evidence boundary.");
+var corporationTaxApprovalDdl = File.ReadAllText(Path.Combine(source, "Database", "Tax",
+    "CorporationTaxApproval.sql"));
+Assert(corporationTaxApprovalDdl.Contains("Tax.CorporationTaxApproval", StringComparison.Ordinal)
+       && corporationTaxApprovalDdl.Contains(
+           "FOREIGN KEY (TenantReference, PreparationReference)", StringComparison.Ordinal)
+       && corporationTaxApprovalDdl.Contains(
+           "UNIQUE INDEX UX_Tax_CorporationTaxApproval_Preparation", StringComparison.Ordinal)
+       && corporationTaxApprovalDdl.Contains("ApprovalSha256", StringComparison.Ordinal)
+       && corporationTaxApprovalDdl.Contains("TO TaxHubCorporationTaxApplication",
+           StringComparison.Ordinal)
+       && corporationTaxApprovalDdl.Contains("TO tradecontrol_tax_workflow_runtime",
+           StringComparison.Ordinal)
+       && corporationTaxApprovalDdl.Contains(
+           "REVOKE SELECT, INSERT, UPDATE, DELETE ON OBJECT::Tax.CorporationTaxApproval",
+           StringComparison.Ordinal)
+       && !corporationTaxApprovalDdl.Contains("UPDATE Tax.CorporationTaxApproval",
+           StringComparison.OrdinalIgnoreCase)
+       && !corporationTaxApprovalDdl.Contains("DELETE FROM Tax.CorporationTaxApproval",
+           StringComparison.OrdinalIgnoreCase),
+    "Corporation Tax approval SQL lost its immutable one-per-preparation evidence boundary.");
+var corporationTaxConversationDdl = File.ReadAllText(Path.Combine(source, "Database", "Tax",
+    "CorporationTaxConversation.sql"));
+Assert(corporationTaxConversationDdl.Contains("Tax.CorporationTaxConversation", StringComparison.Ordinal)
+       && corporationTaxConversationDdl.Contains(
+           "PRIMARY KEY (TenantReference, Reference)", StringComparison.Ordinal)
+       && corporationTaxConversationDdl.Contains(
+           "UX_Tax_CorporationTaxConversation_LogicalSubmission", StringComparison.Ordinal)
+       && !corporationTaxConversationDdl.Contains("WHERE IsComplete = 0", StringComparison.Ordinal)
+       && corporationTaxConversationDdl.Contains("PollNotBeforeUtc datetime2(7) NULL",
+           StringComparison.Ordinal)
+       && corporationTaxConversationDdl.Contains("PayloadJson", StringComparison.Ordinal)
+       && corporationTaxConversationDdl.Contains("TO TaxHubCorporationTaxApplication",
+           StringComparison.Ordinal)
+       && corporationTaxConversationDdl.Contains("TO tradecontrol_tax_workflow_runtime",
+           StringComparison.Ordinal)
+       && corporationTaxConversationDdl.Contains(
+           "REVOKE SELECT, INSERT, UPDATE, DELETE ON OBJECT::Tax.CorporationTaxConversation",
+           StringComparison.Ordinal)
+       && !corporationTaxConversationDdl.Contains("DROP TABLE", StringComparison.OrdinalIgnoreCase)
+       && !corporationTaxConversationDdl.Contains("DELETE FROM", StringComparison.OrdinalIgnoreCase),
+    "Corporation Tax conversation SQL lost its tenant, one-send or least-privilege boundary.");
 Assert(companiesHouseDdl.Contains("ALTER SCHEMA Tax TRANSFER", StringComparison.Ordinal)
        && companiesHouseDdl.Contains("DROP SCHEMA TaxHub", StringComparison.Ordinal),
     "Companies House workflow SQL does not preserve the reviewed TaxHub-to-Tax migration path.");

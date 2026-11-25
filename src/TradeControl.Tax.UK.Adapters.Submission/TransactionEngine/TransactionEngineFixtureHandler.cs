@@ -24,7 +24,7 @@ internal sealed record TransactionEngineOutboundMessage(
 /// client; a separate one-attempt exchange coordinator composes it with HTTP.
 /// </summary>
 internal sealed class TransactionEngineConversationCoordinator(
-    FileTransactionEngineConversationStore conversations,
+    ITransactionEngineConversationStore conversations,
     ISubmissionContentStore content,
     TransactionEngineProtocolOptions options,
     TimeProvider? timeProvider = null)

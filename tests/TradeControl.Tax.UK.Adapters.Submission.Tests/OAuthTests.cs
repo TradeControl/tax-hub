@@ -58,7 +58,10 @@ internal static class OAuthTests
                 throw new InvalidOperationException("A broker ticket crossed its cryptographic purpose boundary.");
             }
             catch (System.Security.Cryptography.CryptographicException) { }
-            var tampered = protectedTicket[..^1] + (protectedTicket[^1] == 'A' ? 'B' : 'A');
+            var tamperIndex = protectedTicket.Length / 2;
+            var tamperedCharacters = protectedTicket.ToCharArray();
+            tamperedCharacters[tamperIndex] = tamperedCharacters[tamperIndex] == 'A' ? 'B' : 'A';
+            var tampered = new string(tamperedCharacters);
             assertions++;
             try
             {

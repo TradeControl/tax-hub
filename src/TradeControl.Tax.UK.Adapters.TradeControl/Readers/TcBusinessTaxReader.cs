@@ -224,7 +224,7 @@ ORDER BY TagCode;
 SELECT PeriodStart, PeriodEnd, PayOn, NetProfit, CalculatedTaxDue,
        BusinessTaxAdjustment, BusinessTaxRate, IsUniformTaxRate,
        StatementTaxDue, StatementTaxPaid, StatementBalance, PreviousLossesCarriedForward,
-       LossesCarriedForward, SnapshotRowVer
+       LossesCarriedForward
 FROM Cash.fnTaxBizComputation(@PeriodStart, @PeriodEnd);
 """;
         using var connection = _connectionFactory.Create(connectionString);
@@ -236,23 +236,61 @@ FROM Cash.fnTaxBizComputation(@PeriodStart, @PeriodEnd);
         if (!await reader.ReadAsync(cancellationToken))
             throw new InvalidOperationException(
                 $"No Corporation Tax due-date window exists for {periodStart:yyyy-MM-dd} to {periodEnd:yyyy-MM-dd} (exclusive).");
-        var rowVersion = Convert.ToHexString((byte[])reader["SnapshotRowVer"]);
+        var returnedStart = SqlHelpers.GetDateTime(reader, "PeriodStart");
+        var returnedEnd = SqlHelpers.GetDateTime(reader, "PeriodEnd");
+        var payOn = SqlHelpers.GetDateTime(reader, "PayOn");
+        var netProfit = SqlHelpers.GetDecimal(reader, "NetProfit");
+        var calculatedTaxDue = SqlHelpers.GetDecimal(reader, "CalculatedTaxDue");
+        var businessTaxAdjustment = SqlHelpers.GetDecimal(reader, "BusinessTaxAdjustment");
+        var businessTaxRate = reader["BusinessTaxRate"] == DBNull.Value
+            ? (decimal?)null
+            : SqlHelpers.GetDecimal(reader, "BusinessTaxRate");
+        var isUniformTaxRate = reader.GetBoolean(reader.GetOrdinal("IsUniformTaxRate"));
+        var statementTaxDue = SqlHelpers.GetDecimal(reader, "StatementTaxDue");
+        var statementTaxPaid = SqlHelpers.GetDecimal(reader, "StatementTaxPaid");
+        var statementBalance = SqlHelpers.GetDecimal(reader, "StatementBalance");
+        var previousLosses = SqlHelpers.GetDecimal(reader, "PreviousLossesCarriedForward");
+        var losses = SqlHelpers.GetDecimal(reader, "LossesCarriedForward");
+
+        // @@DBTS is database-wide and can advance because of an unrelated write between two
+        // identical statutory reads. Currentness evidence must therefore describe the complete
+        // projection itself, as the balance-sheet and liability readers already do.
+        var canonical = string.Join("|", new object?[]
+        {
+            returnedStart.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            returnedEnd.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            payOn.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture),
+            netProfit,
+            calculatedTaxDue,
+            businessTaxAdjustment,
+            businessTaxRate,
+            isUniformTaxRate,
+            statementTaxDue,
+            statementTaxPaid,
+            statementBalance,
+            previousLosses,
+            losses
+        }.Select(value => value is IFormattable formattable
+            ? formattable.ToString(null, CultureInfo.InvariantCulture)
+            : value?.ToString() ?? string.Empty));
+        var projectionToken = Convert.ToHexString(
+            SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
         return new()
         {
-            PeriodStart = SqlHelpers.GetDateTime(reader, "PeriodStart"),
-            PeriodEnd = SqlHelpers.GetDateTime(reader, "PeriodEnd"),
-            PayOn = SqlHelpers.GetDateTime(reader, "PayOn"),
-            NetProfit = SqlHelpers.GetDecimal(reader, "NetProfit"),
-            CalculatedTaxDue = SqlHelpers.GetDecimal(reader, "CalculatedTaxDue"),
-            BusinessTaxAdjustment = SqlHelpers.GetDecimal(reader, "BusinessTaxAdjustment"),
-            BusinessTaxRate = reader["BusinessTaxRate"] == DBNull.Value ? null : SqlHelpers.GetDecimal(reader, "BusinessTaxRate"),
-            IsUniformTaxRate = reader.GetBoolean(reader.GetOrdinal("IsUniformTaxRate")),
-            StatementTaxDue = SqlHelpers.GetDecimal(reader, "StatementTaxDue"),
-            StatementTaxPaid = SqlHelpers.GetDecimal(reader, "StatementTaxPaid"),
-            StatementBalance = SqlHelpers.GetDecimal(reader, "StatementBalance"),
-            PreviousLossesCarriedForward = SqlHelpers.GetDecimal(reader, "PreviousLossesCarriedForward"),
-            LossesCarriedForward = SqlHelpers.GetDecimal(reader, "LossesCarriedForward"),
-            Versions = [new("Cash.fnTaxBizComputation", rowVersion, null)]
+            PeriodStart = returnedStart,
+            PeriodEnd = returnedEnd,
+            PayOn = payOn,
+            NetProfit = netProfit,
+            CalculatedTaxDue = calculatedTaxDue,
+            BusinessTaxAdjustment = businessTaxAdjustment,
+            BusinessTaxRate = businessTaxRate,
+            IsUniformTaxRate = isUniformTaxRate,
+            StatementTaxDue = statementTaxDue,
+            StatementTaxPaid = statementTaxPaid,
+            StatementBalance = statementBalance,
+            PreviousLossesCarriedForward = previousLosses,
+            LossesCarriedForward = losses,
+            Versions = [new("Cash.fnTaxBizComputation", projectionToken, null)]
         };
     }
 

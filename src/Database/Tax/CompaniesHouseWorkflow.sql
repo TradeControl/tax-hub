@@ -140,12 +140,31 @@ IF DATABASE_PRINCIPAL_ID(N'TaxHubCompaniesHouseApplication') IS NULL
     CREATE ROLE TaxHubCompaniesHouseApplication AUTHORIZATION dbo;
 GO
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax TO TaxHubCompaniesHouseApplication;
+REVOKE SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax
+    FROM TaxHubCompaniesHouseApplication;
+GRANT SELECT, INSERT ON OBJECT::Tax.CompaniesHousePreparation
+    TO TaxHubCompaniesHouseApplication;
+GRANT SELECT, INSERT ON OBJECT::Tax.CompaniesHouseApproval
+    TO TaxHubCompaniesHouseApplication;
+GRANT SELECT, INSERT, UPDATE ON OBJECT::Tax.CompaniesHouseConversation
+    TO TaxHubCompaniesHouseApplication;
+GRANT SELECT, INSERT, UPDATE ON OBJECT::Tax.CompaniesHouseAuthoritySequence
+    TO TaxHubCompaniesHouseApplication;
 GO
 
--- The multi-tenant hosting initializer owns this role. Grant it the same workflow
--- boundary when that initializer has already established the reviewed database.
+-- The hosting initializer owns this role. Remove the historical schema-wide grant and
+-- grant only the Companies House objects when it has already established the database.
 IF DATABASE_PRINCIPAL_ID(N'tradecontrol_tax_workflow_runtime') IS NOT NULL
-    GRANT SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax
+BEGIN
+    REVOKE SELECT, INSERT, UPDATE, DELETE ON SCHEMA::Tax
+        FROM tradecontrol_tax_workflow_runtime;
+    GRANT SELECT, INSERT ON OBJECT::Tax.CompaniesHousePreparation
         TO tradecontrol_tax_workflow_runtime;
+    GRANT SELECT, INSERT ON OBJECT::Tax.CompaniesHouseApproval
+        TO tradecontrol_tax_workflow_runtime;
+    GRANT SELECT, INSERT, UPDATE ON OBJECT::Tax.CompaniesHouseConversation
+        TO tradecontrol_tax_workflow_runtime;
+    GRANT SELECT, INSERT, UPDATE ON OBJECT::Tax.CompaniesHouseAuthoritySequence
+        TO tradecontrol_tax_workflow_runtime;
+END;
 GO

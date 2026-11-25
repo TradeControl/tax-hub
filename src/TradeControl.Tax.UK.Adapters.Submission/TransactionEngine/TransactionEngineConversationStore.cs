@@ -55,7 +55,67 @@ internal sealed record TransactionEngineConversationStoreOptions(
     string MetadataPath,
     int MaximumRecords = 10_000);
 
-internal sealed class FileTransactionEngineConversationStore
+internal interface ITransactionEngineConversationStore
+{
+    Task<TransactionEngineConversationRecord> CreateAsync(
+        string tenantReference, string principalReference, string logicalSubmissionReference,
+        TransactionEngineMaterializedSubmission submission, string payloadReference,
+        CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord?> GetAsync(string tenantReference,
+        string principalReference, string conversationReference,
+        CancellationToken cancellationToken = default);
+    Task<TransactionEngineConversationRecord?> GetForLogicalSubmissionAsync(
+        string tenantReference, string logicalSubmissionReference,
+        CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<TransactionEngineConversationRecord>> ListActionableAsync(
+        DateTimeOffset now, int maximumRecords,
+        CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> BeginSubmissionAsync(string tenant, string principal,
+        string reference, CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RecordAcknowledgementAsync(string tenant, string principal,
+        string reference, TransactionEngineParsedResponse response,
+        CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RecordRecoveredCorrelationAsync(
+        string tenant, string principal, string reference, string correlationId, Uri responseEndpoint,
+        int pollIntervalSeconds, CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RecordPollAcknowledgementAsync(
+        string tenant, string principal, string reference, TransactionEngineParsedResponse response,
+        CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RecordTerminalAsync(
+        string tenant, string principal, string reference, TransactionEngineParsedResponse response,
+        string terminalResponseReference, string? receiptReference,
+        CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RefreshTerminalRoutingAsync(
+        string tenant, string principal, string reference, TransactionEngineParsedResponse response,
+        string terminalResponseReference, CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> BeginDeleteAsync(string tenant, string principal,
+        string reference, CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RecordDeleteResponseAsync(string tenant, string principal,
+        string reference, TransactionEngineParsedResponse response,
+        CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RequireRecoveryAsync(string tenant, string principal,
+        string reference, string reason, CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RecordGatewayErrorAsync(string tenant, string principal,
+        string reference, TransactionEngineParsedResponse response, string responseReference,
+        CancellationToken cancellationToken = default);
+
+    Task<TransactionEngineConversationRecord> RecordResponseEvidenceAsync(
+        string tenant, string principal, string reference, string responseReference, string responseSha256,
+        CancellationToken cancellationToken = default);
+}
+
+internal sealed class FileTransactionEngineConversationStore : ITransactionEngineConversationStore
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Locks =
         new(StringComparer.OrdinalIgnoreCase);
@@ -76,7 +136,7 @@ internal sealed class FileTransactionEngineConversationStore
         _lock = Locks.GetOrAdd(_options.MetadataPath, _ => new SemaphoreSlim(1, 1));
     }
 
-    internal Task<TransactionEngineConversationRecord> CreateAsync(
+    public Task<TransactionEngineConversationRecord> CreateAsync(
         string tenantReference, string principalReference, string logicalSubmissionReference,
         TransactionEngineMaterializedSubmission submission, string payloadReference,
         CancellationToken cancellationToken = default) => MutateAsync(records =>
@@ -86,9 +146,9 @@ internal sealed class FileTransactionEngineConversationStore
         ValidateReference(logicalSubmissionReference, nameof(logicalSubmissionReference));
         ValidateReference(payloadReference, nameof(payloadReference));
         if (records.Any(record => record.TenantReference == tenantReference
-                && record.LogicalSubmissionReference == logicalSubmissionReference
-                && record.Stage != TransactionEngineConversationStage.Complete))
-            throw new InvalidOperationException("An incomplete Transaction Engine conversation already exists.");
+                && record.LogicalSubmissionReference == logicalSubmissionReference))
+            throw new InvalidOperationException(
+                "A Transaction Engine conversation already exists for this approved filing.");
         if (records.Count >= _options.MaximumRecords)
             throw new InvalidOperationException("The Transaction Engine conversation store is full.");
         var now = _timeProvider.GetUtcNow();
@@ -101,7 +161,7 @@ internal sealed class FileTransactionEngineConversationStore
         return created;
     }, cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord?> GetAsync(string tenantReference,
+    public Task<TransactionEngineConversationRecord?> GetAsync(string tenantReference,
         string principalReference, string conversationReference,
         CancellationToken cancellationToken = default) => InspectAsync(records =>
     {
@@ -112,13 +172,40 @@ internal sealed class FileTransactionEngineConversationStore
             && record.TenantReference == tenantReference && record.PrincipalReference == principalReference);
     }, cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> BeginSubmissionAsync(string tenant, string principal,
+    public Task<TransactionEngineConversationRecord?> GetForLogicalSubmissionAsync(
+        string tenantReference, string logicalSubmissionReference,
+        CancellationToken cancellationToken = default) => InspectAsync(records =>
+    {
+        ValidateReference(tenantReference, nameof(tenantReference));
+        ValidateReference(logicalSubmissionReference, nameof(logicalSubmissionReference));
+        return records.SingleOrDefault(record => record.TenantReference == tenantReference
+            && record.LogicalSubmissionReference == logicalSubmissionReference);
+    }, cancellationToken);
+
+    public Task<IReadOnlyList<TransactionEngineConversationRecord>> ListActionableAsync(
+        DateTimeOffset now, int maximumRecords,
+        CancellationToken cancellationToken = default) => InspectAsync<IReadOnlyList<TransactionEngineConversationRecord>>(
+        records =>
+        {
+            if (maximumRecords is < 1 or > 1000)
+                throw new ArgumentOutOfRangeException(nameof(maximumRecords));
+            return records.Where(record =>
+                    record.Stage is TransactionEngineConversationStage.TerminalPersisted
+                        or TransactionEngineConversationStage.DeletePending
+                    || record.Stage == TransactionEngineConversationStage.AwaitingPoll
+                        && record.PollNotBefore <= now)
+                .OrderBy(record => record.PollNotBefore ?? record.UpdatedAt)
+                .Take(maximumRecords)
+                .ToArray();
+        }, cancellationToken);
+
+    public Task<TransactionEngineConversationRecord> BeginSubmissionAsync(string tenant, string principal,
         string reference, CancellationToken cancellationToken = default) => TransitionAsync(
             tenant, principal, reference, TransactionEngineConversationStage.Prepared,
             current => current with { Stage = TransactionEngineConversationStage.SubmissionUncertain },
             cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> RecordAcknowledgementAsync(string tenant, string principal,
+    public Task<TransactionEngineConversationRecord> RecordAcknowledgementAsync(string tenant, string principal,
         string reference, TransactionEngineParsedResponse response,
         CancellationToken cancellationToken = default)
     {
@@ -138,7 +225,7 @@ internal sealed class FileTransactionEngineConversationStore
             }, cancellationToken);
     }
 
-    internal Task<TransactionEngineConversationRecord> RecordRecoveredCorrelationAsync(
+    public Task<TransactionEngineConversationRecord> RecordRecoveredCorrelationAsync(
         string tenant, string principal, string reference, string correlationId, Uri responseEndpoint,
         int pollIntervalSeconds, CancellationToken cancellationToken = default)
     {
@@ -157,7 +244,7 @@ internal sealed class FileTransactionEngineConversationStore
             }, cancellationToken);
     }
 
-    internal Task<TransactionEngineConversationRecord> RecordPollAcknowledgementAsync(
+    public Task<TransactionEngineConversationRecord> RecordPollAcknowledgementAsync(
         string tenant, string principal, string reference, TransactionEngineParsedResponse response,
         CancellationToken cancellationToken = default) => TransitionAsync(
             tenant, principal, reference, TransactionEngineConversationStage.AwaitingPoll,
@@ -175,7 +262,7 @@ internal sealed class FileTransactionEngineConversationStore
                 };
             }, cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> RecordTerminalAsync(
+    public Task<TransactionEngineConversationRecord> RecordTerminalAsync(
         string tenant, string principal, string reference, TransactionEngineParsedResponse response,
         string terminalResponseReference, string? receiptReference,
         CancellationToken cancellationToken = default) => TransitionAsync(
@@ -204,7 +291,7 @@ internal sealed class FileTransactionEngineConversationStore
                 };
             }, cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> RefreshTerminalRoutingAsync(
+    public Task<TransactionEngineConversationRecord> RefreshTerminalRoutingAsync(
         string tenant, string principal, string reference, TransactionEngineParsedResponse response,
         string terminalResponseReference, CancellationToken cancellationToken = default) =>
         MutateOwnedAsync(tenant, principal, reference, current =>
@@ -228,7 +315,7 @@ internal sealed class FileTransactionEngineConversationStore
             };
         }, cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> BeginDeleteAsync(string tenant, string principal,
+    public Task<TransactionEngineConversationRecord> BeginDeleteAsync(string tenant, string principal,
         string reference, CancellationToken cancellationToken = default) => TransitionAsync(
             tenant, principal, reference, TransactionEngineConversationStage.TerminalPersisted,
             current => current.MayDelete
@@ -236,7 +323,7 @@ internal sealed class FileTransactionEngineConversationStore
                 : throw new InvalidOperationException("Terminal evidence must be persisted before delete."),
             cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> RecordDeleteResponseAsync(string tenant, string principal,
+    public Task<TransactionEngineConversationRecord> RecordDeleteResponseAsync(string tenant, string principal,
         string reference, TransactionEngineParsedResponse response,
         CancellationToken cancellationToken = default) => TransitionAsync(
             tenant, principal, reference, TransactionEngineConversationStage.DeletePending,
@@ -248,7 +335,7 @@ internal sealed class FileTransactionEngineConversationStore
                 return current with { Stage = TransactionEngineConversationStage.Complete };
             }, cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> RequireRecoveryAsync(string tenant, string principal,
+    public Task<TransactionEngineConversationRecord> RequireRecoveryAsync(string tenant, string principal,
         string reference, string reason, CancellationToken cancellationToken = default) => MutateOwnedAsync(
             tenant, principal, reference, current =>
             {
@@ -262,7 +349,7 @@ internal sealed class FileTransactionEngineConversationStore
                 };
             }, cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> RecordGatewayErrorAsync(string tenant, string principal,
+    public Task<TransactionEngineConversationRecord> RecordGatewayErrorAsync(string tenant, string principal,
         string reference, TransactionEngineParsedResponse response, string responseReference,
         CancellationToken cancellationToken = default) => MutateOwnedAsync(tenant, principal, reference, current =>
     {
@@ -282,7 +369,7 @@ internal sealed class FileTransactionEngineConversationStore
         };
     }, cancellationToken);
 
-    internal Task<TransactionEngineConversationRecord> RecordResponseEvidenceAsync(
+    public Task<TransactionEngineConversationRecord> RecordResponseEvidenceAsync(
         string tenant, string principal, string reference, string responseReference, string responseSha256,
         CancellationToken cancellationToken = default) => MutateOwnedAsync(tenant, principal, reference, current =>
     {

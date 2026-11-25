@@ -42,9 +42,18 @@ IF NOT EXISTS
             (TenantReference, AccountsSnapshotSha256, PeriodStart, PeriodEnd);
 GO
 
+IF DATABASE_PRINCIPAL_ID(N'TaxHubCorporationTaxApplication') IS NULL
+    CREATE ROLE TaxHubCorporationTaxApplication AUTHORIZATION dbo;
+GO
+
 IF DATABASE_PRINCIPAL_ID(N'TaxHubCompaniesHouseApplication') IS NOT NULL
+    REVOKE SELECT, INSERT, UPDATE ON OBJECT::Tax.CorporationTaxReview
+        FROM TaxHubCompaniesHouseApplication;
+GO
+
+IF DATABASE_PRINCIPAL_ID(N'TaxHubCorporationTaxApplication') IS NOT NULL
     GRANT SELECT, INSERT, UPDATE ON OBJECT::Tax.CorporationTaxReview
-        TO TaxHubCompaniesHouseApplication;
+        TO TaxHubCorporationTaxApplication;
 GO
 
 IF DATABASE_PRINCIPAL_ID(N'tradecontrol_tax_workflow_runtime') IS NOT NULL

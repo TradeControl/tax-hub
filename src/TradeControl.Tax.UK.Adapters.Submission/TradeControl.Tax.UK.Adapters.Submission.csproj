@@ -12,6 +12,7 @@
     <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
   </ItemGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="TradeControl.Web" />
     <InternalsVisibleTo Include="TradeControl.Tax.UK.WebHarness.Tests" />
     <InternalsVisibleTo Include="TradeControl.Tax.UK.Adapters.Submission.Tests" />
   </ItemGroup>
